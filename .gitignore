@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+.catkin_tools/
+build/
+devel/
+logs/

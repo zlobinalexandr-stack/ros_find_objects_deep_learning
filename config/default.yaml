@@ -1,0 +1,10 @@
+# ros_deep_learning DepthNet normally publishes 32FC1 values. Change this to
+# 0.001 only when the configured depth topic contains millimetres.
+depth_scale: 1.0
+depth_window_radius: 4
+min_depth: 0.05
+max_depth: 100.0
+max_depth_age: 0.5
+object_frame_prefix: "object_"
+add_object_service: "/find_object_2d/add_object"
+bind_address: "0.0.0.0"
