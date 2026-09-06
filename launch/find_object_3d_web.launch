@@ -5,6 +5,11 @@
   <arg name="objects_topic" default="/objectsStamped"/>
   <arg name="object_topic" default="/find_object_2d/object"/>
   <arg name="port" default="8080"/>
+  <arg name="rosbridge_port" default="9090"/>
+
+  <include file="$(find rosbridge_server)/launch/rosbridge_websocket.launch">
+    <arg name="port" value="$(arg rosbridge_port)"/>
+  </include>
 
   <!-- Run find_object_2d separately with the same RGB image topic. -->
   <node pkg="find_object_3d_web" type="find_object_3d_web_node" name="find_object_3d_web" output="screen">

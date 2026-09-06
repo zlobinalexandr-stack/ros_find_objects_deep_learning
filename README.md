@@ -21,7 +21,7 @@ rosrun tf tf_echo base_link object_1
 ## Установка (Melodic / Ubuntu 18.04)
 
 ```bash
-sudo apt install ros-melodic-find-object-2d ros-melodic-cv-bridge python-opencv python-numpy
+sudo apt install ros-melodic-find-object-2d ros-melodic-cv-bridge ros-melodic-rosbridge-server python-opencv python-numpy
 cd ~/catkin_ws/src
 git clone <URL-этого-репозитория> find_object_3d_web
 cd ..
@@ -45,6 +45,10 @@ source devel/setup.bash
    ```
 
 4. Откройте `http://<IP-робота>:8080`, обведите объект и нажмите «Добавить объект».
+   Видео поступает в браузер через `roslibjs` и rosbridge из топика
+   `/video/image_compressed/compressed`. Launch-файл запускает rosbridge на порту
+   `9090`. Другой websocket можно указать в URL страницы, например
+   `?rosbridge=ws://robot:9191`.
 5. Проверьте результат:
 
    ```bash
