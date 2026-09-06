@@ -1,0 +1,213 @@
+#!/usr/bin/env python
+from __future__ import print_function
+
+import json
+import os
+import threading
+import time
+
+try:
+    from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
+    from SocketServer import ThreadingMixIn
+except ImportError:
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+    from socketserver import ThreadingMixIn
+
+import cv2
+import numpy as np
+import rospy
+from cv_bridge import CvBridge, CvBridgeError
+from find_object_2d.msg import ObjectsStamped
+from find_object_2d.srv import AddObject, AddObjectRequest
+from geometry_msgs.msg import TransformStamped
+from sensor_msgs.msg import CameraInfo, CompressedImage, Image
+import tf2_ros
+
+from find_object_3d_web.geometry import parse_detections, projected_center, project_pixel, robust_depth
+
+
+class SharedState(object):
+    def __init__(self):
+        self.lock = threading.RLock()
+        self.jpeg = None
+        self.rgb = None
+        self.rgb_shape = None
+        self.depth = None
+        self.depth_stamp = rospy.Time(0)
+        self.depth_frame = ''
+        self.camera_info = None
+        self.error = ''
+
+
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+
+
+class Node(object):
+    def __init__(self):
+        self.state = SharedState()
+        self.bridge = CvBridge()
+        self.tf_broadcaster = tf2_ros.TransformBroadcaster()
+        self.web_dir = os.path.abspath(rospy.get_param('~web_dir'))
+        self.depth_scale = float(rospy.get_param('~depth_scale', 1.0))
+        self.radius = int(rospy.get_param('~depth_window_radius', 4))
+        self.min_depth = float(rospy.get_param('~min_depth', 0.05))
+        self.max_depth = float(rospy.get_param('~max_depth', 100.0))
+        self.max_depth_age = float(rospy.get_param('~max_depth_age', 0.5))
+        self.frame_prefix = rospy.get_param('~object_frame_prefix', 'object_')
+        self.add_service_name = rospy.get_param('~add_object_service', '/find_object_2d/add_object')
+        self.add_object = rospy.ServiceProxy(self.add_service_name, AddObject)
+
+        image_topic = rospy.get_param('~image_topic', '/video/image_raw')
+        depth_topic = rospy.get_param('~depth_topic', '/depthnet/depth')
+        info_topic = rospy.get_param('~camera_info_topic', '/video/camera_info')
+        objects_topic = rospy.get_param('~objects_topic', '/objectsStamped')
+        rospy.Subscriber(image_topic, Image, self.image_callback, queue_size=1, buff_size=2 ** 24)
+        rospy.Subscriber(depth_topic, Image, self.depth_callback, queue_size=1, buff_size=2 ** 24)
+        rospy.Subscriber(info_topic, CameraInfo, self.info_callback, queue_size=1)
+        rospy.Subscriber(objects_topic, ObjectsStamped, self.objects_callback, queue_size=10)
+
+        node = self
+        class Handler(WebHandler):
+            owner = node
+        self.httpd = ThreadingHTTPServer((rospy.get_param('~bind_address', '0.0.0.0'),
+                                          int(rospy.get_param('~port', 8080))), Handler)
+        self.server_thread = threading.Thread(target=self.httpd.serve_forever)
+        self.server_thread.daemon = True
+        self.server_thread.start()
+        rospy.on_shutdown(self.httpd.shutdown)
+        rospy.loginfo('Object selection UI: http://%s:%d', self.httpd.server_address[0], self.httpd.server_address[1])
+
+    def image_callback(self, msg):
+        try:
+            rgb = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+            ok, encoded = cv2.imencode('.jpg', rgb, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+            if ok:
+                with self.state.lock:
+                    self.state.rgb = rgb.copy()
+                    self.state.rgb_shape = rgb.shape[:2]
+                    self.state.jpeg = encoded.tobytes()
+        except CvBridgeError as error:
+            rospy.logwarn_throttle(5, 'Cannot convert camera image: %s', error)
+
+    def depth_callback(self, msg):
+        try:
+            depth = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
+            with self.state.lock:
+                self.state.depth = np.asarray(depth, dtype=np.float32) * self.depth_scale
+                self.state.depth_stamp = msg.header.stamp
+                self.state.depth_frame = msg.header.frame_id
+        except CvBridgeError as error:
+            rospy.logwarn_throttle(5, 'Cannot convert depth image: %s', error)
+
+    def info_callback(self, msg):
+        with self.state.lock:
+            self.state.camera_info = msg
+
+    def objects_callback(self, msg):
+        with self.state.lock:
+            depth = None if self.state.depth is None else self.state.depth.copy()
+            info = self.state.camera_info
+            rgb_shape = self.state.rgb_shape
+            stamp, depth_frame = self.state.depth_stamp, self.state.depth_frame
+        if depth is None or info is None or rgb_shape is None:
+            return
+        detection_stamp = msg.header.stamp
+        if detection_stamp != rospy.Time(0) and stamp != rospy.Time(0) and abs((detection_stamp - stamp).to_sec()) > self.max_depth_age:
+            rospy.logwarn_throttle(5, 'Ignoring detection: depth/image time difference is too large')
+            return
+        try:
+            detections = parse_detections(msg.objects.data)
+            for object_id, width, height, homography in detections:
+                u, v = projected_center(width, height, homography)
+                # find_object_2d coordinates refer to RGB; map them when DepthNet has another resolution.
+                du = u * depth.shape[1] / float(rgb_shape[1])
+                dv = v * depth.shape[0] / float(rgb_shape[0])
+                z = robust_depth(depth, du, dv, self.radius, self.min_depth, self.max_depth)
+                if z is None:
+                    continue
+                # CameraInfo normally describes RGB dimensions, so project the original RGB pixel.
+                x, y, z = project_pixel(u, v, z, info)
+                transform = TransformStamped()
+                transform.header.stamp = stamp if stamp != rospy.Time(0) else rospy.Time.now()
+                # Projection uses the RGB CameraInfo model, therefore the result belongs
+                # to its optical frame (registered depth is a prerequisite).
+                transform.header.frame_id = info.header.frame_id or depth_frame
+                transform.child_frame_id = self.frame_prefix + str(object_id)
+                transform.transform.translation.x = x
+                transform.transform.translation.y = y
+                transform.transform.translation.z = z
+                transform.transform.rotation.w = 1.0
+                self.tf_broadcaster.sendTransform(transform)
+        except (ValueError, TypeError) as error:
+            rospy.logwarn_throttle(5, 'Invalid find_object_2d detection: %s', error)
+
+    def add_selection(self, selection):
+        with self.state.lock:
+            image = None if self.state.rgb is None else self.state.rgb.copy()
+        if image is None:
+            raise RuntimeError('No camera image received yet')
+        height, width = image.shape[:2]
+        x0 = max(0, min(width - 1, int(float(selection['x0']) * width)))
+        y0 = max(0, min(height - 1, int(float(selection['y0']) * height)))
+        x1 = max(x0 + 1, min(width, int(float(selection['x1']) * width)))
+        y1 = max(y0 + 1, min(height, int(float(selection['y1']) * height)))
+        if (x1 - x0) < 8 or (y1 - y0) < 8:
+            raise ValueError('Selection must be at least 8 by 8 pixels')
+        ok, encoded = cv2.imencode('.jpg', image[y0:y1, x0:x1])
+        if not ok:
+            raise RuntimeError('Could not encode object image')
+        request = AddObjectRequest()
+        if hasattr(request, 'id'):
+            request.id = int(selection.get('id', 0))
+        if hasattr(request, 'file_path'):
+            request.file_path = ''
+        request.image = CompressedImage(format='jpeg', data=encoded.tobytes())
+        response = self.add_object(request)
+        return getattr(response, 'id', getattr(request, 'id', 0))
+
+
+class WebHandler(BaseHTTPRequestHandler):
+    owner = None
+
+    def log_message(self, fmt, *args):
+        rospy.logdebug(fmt, *args)
+
+    def _reply(self, code, content, content_type='application/json'):
+        self.send_response(code)
+        self.send_header('Content-Type', content_type)
+        self.send_header('Content-Length', str(len(content)))
+        self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+        self.wfile.write(content)
+
+    def do_GET(self):
+        if self.path == '/frame.jpg':
+            with self.owner.state.lock:
+                data = self.owner.state.jpeg
+            return self._reply(503, b'No frame') if data is None else self._reply(200, data, 'image/jpeg')
+        path = 'index.html' if self.path in ('/', '/index.html') else self.path.lstrip('/')
+        path = os.path.abspath(os.path.join(self.owner.web_dir, path))
+        if not path.startswith(self.owner.web_dir + os.sep) or not os.path.isfile(path):
+            return self._reply(404, b'Not found', 'text/plain')
+        content_type = 'text/css' if path.endswith('.css') else 'application/javascript' if path.endswith('.js') else 'text/html'
+        with open(path, 'rb') as stream:
+            self._reply(200, stream.read(), content_type)
+
+    def do_POST(self):
+        if self.path != '/selection':
+            return self._reply(404, b'{"error":"Not found"}')
+        try:
+            length = min(int(self.headers.get('Content-Length', '0')), 4096)
+            selection = json.loads(self.rfile.read(length).decode('utf-8'))
+            object_id = self.owner.add_selection(selection)
+            self._reply(200, json.dumps({'ok': True, 'id': object_id}).encode('utf-8'))
+        except Exception as error:
+            rospy.logwarn('Cannot add selected object: %s', error)
+            self._reply(400, json.dumps({'ok': False, 'error': str(error)}).encode('utf-8'))
+
+
+if __name__ == '__main__':
+    rospy.init_node('find_object_3d_web')
+    Node()
+    rospy.spin()

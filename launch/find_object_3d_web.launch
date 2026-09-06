@@ -1,0 +1,18 @@
+<launch>
+  <arg name="image_topic" default="/video/image_raw"/>
+  <arg name="depth_topic" default="/depthnet/depth"/>
+  <arg name="camera_info_topic" default="/video/camera_info"/>
+  <arg name="objects_topic" default="/objectsStamped"/>
+  <arg name="port" default="8080"/>
+
+  <!-- Run find_object_2d separately with the same RGB image topic. -->
+  <node pkg="find_object_3d_web" type="find_object_3d_web_node" name="find_object_3d_web" output="screen">
+    <rosparam command="load" file="$(find find_object_3d_web)/config/default.yaml"/>
+    <param name="image_topic" value="$(arg image_topic)"/>
+    <param name="depth_topic" value="$(arg depth_topic)"/>
+    <param name="camera_info_topic" value="$(arg camera_info_topic)"/>
+    <param name="objects_topic" value="$(arg objects_topic)"/>
+    <param name="port" value="$(arg port)"/>
+    <param name="web_dir" value="$(find find_object_3d_web)/web"/>
+  </node>
+</launch>
