@@ -13,13 +13,12 @@ except ImportError:
     from http.server import HTTPServer, BaseHTTPRequestHandler
     from socketserver import ThreadingMixIn
 
-import cv2
 import numpy as np
 import rospy
 from cv_bridge import CvBridge, CvBridgeError
 from find_object_2d.msg import ObjectsStamped
 from geometry_msgs.msg import TransformStamped
-from sensor_msgs.msg import CameraInfo, CompressedImage, Image
+from sensor_msgs.msg import CameraInfo, Image
 import tf2_ros
 
 from find_object_3d_web.geometry import parse_detections, projected_center, project_pixel, robust_depth
