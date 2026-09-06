@@ -55,8 +55,8 @@ class Node(object):
         # The find_object_2d version shipped with ROS Melodic does not install a
         # Python ``find_object_2d.srv`` module.  Its supported runtime interface
         # for adding a template is the private ``object`` image topic instead.
-        object_topic = rospy.get_param('~object_topic', '/find_object_2d/object')
-        self.object_publisher = rospy.Publisher(object_topic, Image, queue_size=1)
+        self.object_topic = rospy.get_param('~object_topic', '/find_object_2d/object')
+        self.object_publisher = rospy.Publisher(self.object_topic, Image, queue_size=1)
 
         image_topic = rospy.get_param('~image_topic', '/video/image_raw')
         depth_topic = rospy.get_param('~depth_topic', '/depthnet/depth')
@@ -136,6 +136,12 @@ class Node(object):
                 transform.transform.translation.z = z
                 transform.transform.rotation.w = 1.0
                 self.tf_broadcaster.sendTransform(transform)
+                rospy.loginfo_throttle(
+                    1.0,
+                    'Object detected: id=%d pixel=(%.1f, %.1f) position=(%.3f, %.3f, %.3f) '
+                    'frame=%s tf=%s',
+                    object_id, u, v, x, y, z, transform.header.frame_id,
+                    transform.child_frame_id)
         except (ValueError, TypeError) as error:
             rospy.logwarn_throttle(5, 'Invalid find_object_2d detection: %s', error)
 
@@ -158,6 +164,10 @@ class Node(object):
         # frame_id asks it to choose the next available id.
         message.header.frame_id = str(object_id) if object_id > 0 else ''
         self.object_publisher.publish(message)
+        rospy.loginfo(
+            'Object template published: id=%s roi=(%d, %d)-(%d, %d) size=%dx%d topic=%s',
+            str(object_id) if object_id > 0 else 'auto', x0, y0, x1, y1,
+            x1 - x0, y1 - y0, self.object_topic)
         return object_id
 
 
