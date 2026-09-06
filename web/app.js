@@ -4,6 +4,8 @@
   const ctx = canvas.getContext('2d');
   const add = document.querySelector('#add');
   const status = document.querySelector('#status');
+  const detectionStatus = document.querySelector('#detection-status');
+  const detectedObjects = document.querySelector('#detected-objects');
   let start = null;
   let box = null;
   let dragging = false;
@@ -41,12 +43,21 @@
     queue_size: 1,
     throttle_rate: 100
   });
+  const objectsTopic = new ROSLIB.Topic({
+    ros,
+    name: '/objectsStamped',
+    messageType: 'find_object_2d/ObjectsStamped',
+    queue_size: 1,
+    throttle_rate: 100
+  });
 
   ros.on('connection', () => setStatus('ROS подключён. Ожидание изображения…'));
   ros.on('error', () => setStatus('Ошибка подключения к rosbridge', true));
   ros.on('close', () => {
     frameReceived = false;
     add.disabled = true;
+    detectionStatus.textContent = 'Нет соединения с ROS';
+    detectedObjects.textContent = '';
     setStatus('Соединение с rosbridge закрыто', true);
   });
 
@@ -58,6 +69,30 @@
     const format = (message.format || '').toLowerCase();
     const mime = format.includes('png') ? 'image/png' : 'image/jpeg';
     image.src = `data:${mime};base64,${message.data}`;
+  });
+
+  objectsTopic.subscribe(message => {
+    const data = message.objects && Array.isArray(message.objects.data)
+      ? message.objects.data
+      : [];
+    detectedObjects.textContent = '';
+    if (data.length === 0) {
+      detectionStatus.textContent = 'Объекты не обнаружены';
+      return;
+    }
+    if (data.length % 12 !== 0) {
+      detectionStatus.textContent = 'Получено некорректное сообщение ObjectsStamped';
+      return;
+    }
+
+    const count = data.length / 12;
+    detectionStatus.textContent = `Обнаружено: ${count}`;
+    for (let offset = 0; offset < data.length; offset += 12) {
+      const badge = document.createElement('span');
+      badge.className = 'detected-object';
+      badge.textContent = `Объект ${Math.trunc(data[offset])}`;
+      detectedObjects.appendChild(badge);
+    }
   });
 
   image.onload = () => {

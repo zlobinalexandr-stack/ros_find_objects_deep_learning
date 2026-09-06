@@ -48,7 +48,9 @@ source devel/setup.bash
    Видео поступает в браузер через `roslibjs` и rosbridge из топика
    `/video/image_compressed/compressed`. Launch-файл запускает rosbridge на порту
    `9090`. Другой websocket можно указать в URL страницы, например
-   `?rosbridge=ws://robot:9191`.
+   `?rosbridge=ws://robot:9191`. Интерфейс также подписывается через `roslibjs`
+   на `/objectsStamped`: под видео отображаются количество и ID объектов,
+   обнаруженных в последнем сообщении.
 5. Проверьте результат:
 
    ```bash

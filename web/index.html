@@ -14,6 +14,11 @@
     </header>
     <p>Обведите объект рамкой. Выделение будет добавлено в <code>find_object_2d</code>, а найденный объект появится в TF как <code>object_ID</code>.</p>
     <div id="viewport"><img id="camera" alt="Поток камеры из ROS"><canvas id="overlay"></canvas></div>
+    <section id="detections" aria-live="polite">
+      <strong>Обнаружения</strong>
+      <span id="detection-status">Ожидание сообщений…</span>
+      <div id="detected-objects"></div>
+    </section>
     <div class="actions"><button id="add" disabled>Добавить объект</button><span id="status">Ожидание изображения…</span></div>
   </main>
   <script src="https://cdn.jsdelivr.net/npm/roslib@1/build/roslib.min.js"></script>
