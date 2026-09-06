@@ -13,7 +13,6 @@ except ImportError:
     from http.server import HTTPServer, BaseHTTPRequestHandler
     from socketserver import ThreadingMixIn
 
-import cv2
 import numpy as np
 import rospy
 from cv_bridge import CvBridge, CvBridgeError
