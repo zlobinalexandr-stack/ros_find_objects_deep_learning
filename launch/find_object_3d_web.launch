@@ -3,7 +3,7 @@
   <arg name="depth_topic" default="/depthnet/depth"/>
   <arg name="camera_info_topic" default="/video/camera_info"/>
   <arg name="objects_topic" default="/objectsStamped"/>
-  <arg name="object_topic" default="/find_object_2d/object"/>
+  <arg name="object_topic" default="/find_object_2d/add_object"/>
   <arg name="port" default="8080"/>
   <arg name="rosbridge_port" default="9090"/>
 
