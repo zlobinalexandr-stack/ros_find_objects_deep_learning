@@ -16,6 +16,7 @@
   <depend>std_msgs</depend>
   <depend>tf2_ros</depend>
   <exec_depend>python-opencv</exec_depend>
+  <exec_depend>rosbridge_server</exec_depend>
   <test_depend>python-nose</test_depend>
   <export/>
 </package>
