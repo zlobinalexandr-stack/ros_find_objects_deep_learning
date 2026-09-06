@@ -56,7 +56,11 @@ class Node(object):
         # Python ``find_object_2d.srv`` module. Templates selected in the web UI
         # are therefore sent to find_object_2d over its image input topic.
         self.object_topic = rospy.get_param('~object_topic', '/find_object_2d/add_object')
-        self.object_publisher = rospy.Publisher(self.object_topic, Image, queue_size=1)
+        # Latching keeps the latest template available while find_object_2d is
+        # starting or reconnecting; a transient lack of subscribers must not
+        # make a valid web request fail.
+        self.object_publisher = rospy.Publisher(
+            self.object_topic, CompressedImage, queue_size=1, latch=True)
 
         image_topic = rospy.get_param('~image_topic', '/video/image_raw')
         depth_topic = rospy.get_param('~depth_topic', '/depthnet/depth')
@@ -182,15 +186,19 @@ class Node(object):
                 x0, y0, x1, y1)
             raise ValueError('Selection must be at least 8 by 8 pixels')
         if self.object_publisher.get_num_connections() == 0:
-            rospy.logerr(
-                'Cannot add object template: topic %s has no subscribers; is find_object_2d running?',
+            rospy.logwarn(
+                'Object template topic %s currently has no subscribers; publishing a latched '
+                'message so find_object_2d can receive it after connecting',
                 self.object_topic)
-            raise RuntimeError('find_object_2d is not subscribed to %s' % self.object_topic)
         try:
-            message = self.bridge.cv2_to_imgmsg(image[y0:y1, x0:x1], encoding='bgr8')
-        except CvBridgeError as error:
-            rospy.logerr('Cannot prepare object template image: %s', error)
-            raise RuntimeError('Could not convert selected object image: %s' % error)
+            encoded, jpeg = cv2.imencode('.jpg', image[y0:y1, x0:x1])
+        except (cv2.error, TypeError, ValueError) as error:
+            rospy.logerr('Cannot encode object template image as JPEG: %s', error)
+            raise RuntimeError('Could not encode selected object image: %s' % error)
+        if not encoded:
+            rospy.logerr('Cannot encode object template image as JPEG: encoder returned false')
+            raise RuntimeError('Could not encode selected object image')
+        message = CompressedImage(format='jpeg', data=jpeg.tobytes())
         message.header.stamp = rospy.Time.now()
         # find_object_2d reads the requested template id from frame_id. An empty
         # frame_id asks it to choose the next available id.

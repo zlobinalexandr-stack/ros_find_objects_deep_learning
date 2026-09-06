@@ -6,6 +6,6 @@ min_depth: 0.05
 max_depth: 100.0
 max_depth_age: 0.5
 object_frame_prefix: "object_"
-# Image input used by find_object_2d to add a template selected in the web UI.
+# CompressedImage input used by find_object_2d to add a web-selected template.
 object_topic: "/find_object_2d/add_object"
 bind_address: "0.0.0.0"
