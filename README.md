@@ -1,6 +1,6 @@
 # find_object_3d_web
 
-Пакет ROS Melodic добавляет к [`find_object_2d`](https://wiki.ros.org/find_object_2d) простой web-интерфейс выбора шаблона и вычисляет положение найденного объекта по карте глубины. Браузер отправляет выделенный фрагмент в сервис `/find_object_2d/add_object`. Для каждого результата `ObjectsStamped` центр шаблона проецируется гомографией в изображение, глубина берётся как медиана небольшого окна, а координаты вычисляются по матрице `K` из `CameraInfo`.
+Пакет ROS Melodic добавляет к [`find_object_2d`](https://wiki.ros.org/find_object_2d) простой web-интерфейс выбора шаблона и вычисляет положение найденного объекта по карте глубины. Браузер отправляет выделенный фрагмент как `sensor_msgs/Image` в `/find_object_2d/object`. Для каждого результата `ObjectsStamped` центр шаблона проецируется гомографией в изображение, глубина берётся как медиана небольшого окна, а координаты вычисляются по матрице `K` из `CameraInfo`.
 
 ## Результат
 
@@ -21,7 +21,7 @@ rosrun tf tf_echo base_link object_1
 ## Установка (Melodic / Ubuntu 18.04)
 
 ```bash
-sudo apt install ros-melodic-find-object-2d ros-melodic-cv-bridge python-opencv python-numpy
+sudo apt install ros-melodic-find-object-2d ros-melodic-cv-bridge ros-melodic-rosbridge-server python-opencv python-numpy
 cd ~/catkin_ws/src
 git clone <URL-этого-репозитория> find_object_3d_web
 cd ..
@@ -45,6 +45,10 @@ source devel/setup.bash
    ```
 
 4. Откройте `http://<IP-робота>:8080`, обведите объект и нажмите «Добавить объект».
+   Видео поступает в браузер через `roslibjs` и rosbridge из топика
+   `/video/image_compressed/compressed`. Launch-файл запускает rosbridge на порту
+   `9090`. Другой websocket можно указать в URL страницы, например
+   `?rosbridge=ws://robot:9191`.
 5. Проверьте результат:
 
    ```bash
@@ -60,14 +64,19 @@ source devel/setup.bash
 | глубина | `/depthnet/depth` |
 | калибровка | `/video/camera_info` |
 | детекции | `/objectsStamped` |
+| новый шаблон | `/find_object_2d/object` |
 
 Имена можно изменить аргументами:
 
 ```bash
 roslaunch find_object_3d_web find_object_3d_web.launch \
   image_topic:=/video/image_raw depth_topic:=/depthnet/depth \
-  camera_info_topic:=/video/camera_info objects_topic:=/objectsStamped port:=8080
+  camera_info_topic:=/video/camera_info objects_topic:=/objectsStamped \
+  object_topic:=/find_object_2d/object port:=8080
 ```
+
+Для совместимости с пакетами ROS Melodic шаблон передаётся через image-топик,
+а не через отсутствующий в этих сборках Python-модуль `find_object_2d.srv`.
 
 ## Важные условия
 

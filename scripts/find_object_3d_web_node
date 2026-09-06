@@ -13,14 +13,12 @@ except ImportError:
     from http.server import HTTPServer, BaseHTTPRequestHandler
     from socketserver import ThreadingMixIn
 
-import cv2
 import numpy as np
 import rospy
 from cv_bridge import CvBridge, CvBridgeError
 from find_object_2d.msg import ObjectsStamped
-from find_object_2d.srv import AddObject, AddObjectRequest
 from geometry_msgs.msg import TransformStamped
-from sensor_msgs.msg import CameraInfo, CompressedImage, Image
+from sensor_msgs.msg import CameraInfo, Image
 import tf2_ros
 
 from find_object_3d_web.geometry import parse_detections, projected_center, project_pixel, robust_depth
@@ -29,7 +27,6 @@ from find_object_3d_web.geometry import parse_detections, projected_center, proj
 class SharedState(object):
     def __init__(self):
         self.lock = threading.RLock()
-        self.jpeg = None
         self.rgb = None
         self.rgb_shape = None
         self.depth = None
@@ -55,8 +52,11 @@ class Node(object):
         self.max_depth = float(rospy.get_param('~max_depth', 100.0))
         self.max_depth_age = float(rospy.get_param('~max_depth_age', 0.5))
         self.frame_prefix = rospy.get_param('~object_frame_prefix', 'object_')
-        self.add_service_name = rospy.get_param('~add_object_service', '/find_object_2d/add_object')
-        self.add_object = rospy.ServiceProxy(self.add_service_name, AddObject)
+        # The find_object_2d version shipped with ROS Melodic does not install a
+        # Python ``find_object_2d.srv`` module.  Its supported runtime interface
+        # for adding a template is the private ``object`` image topic instead.
+        object_topic = rospy.get_param('~object_topic', '/find_object_2d/object')
+        self.object_publisher = rospy.Publisher(object_topic, Image, queue_size=1)
 
         image_topic = rospy.get_param('~image_topic', '/video/image_raw')
         depth_topic = rospy.get_param('~depth_topic', '/depthnet/depth')
@@ -81,12 +81,9 @@ class Node(object):
     def image_callback(self, msg):
         try:
             rgb = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
-            ok, encoded = cv2.imencode('.jpg', rgb, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
-            if ok:
-                with self.state.lock:
-                    self.state.rgb = rgb.copy()
-                    self.state.rgb_shape = rgb.shape[:2]
-                    self.state.jpeg = encoded.tobytes()
+            with self.state.lock:
+                self.state.rgb = rgb.copy()
+                self.state.rgb_shape = rgb.shape[:2]
         except CvBridgeError as error:
             rospy.logwarn_throttle(5, 'Cannot convert camera image: %s', error)
 
@@ -154,17 +151,14 @@ class Node(object):
         y1 = max(y0 + 1, min(height, int(float(selection['y1']) * height)))
         if (x1 - x0) < 8 or (y1 - y0) < 8:
             raise ValueError('Selection must be at least 8 by 8 pixels')
-        ok, encoded = cv2.imencode('.jpg', image[y0:y1, x0:x1])
-        if not ok:
-            raise RuntimeError('Could not encode object image')
-        request = AddObjectRequest()
-        if hasattr(request, 'id'):
-            request.id = int(selection.get('id', 0))
-        if hasattr(request, 'file_path'):
-            request.file_path = ''
-        request.image = CompressedImage(format='jpeg', data=encoded.tobytes())
-        response = self.add_object(request)
-        return getattr(response, 'id', getattr(request, 'id', 0))
+        object_id = int(selection.get('id', 0))
+        message = self.bridge.cv2_to_imgmsg(image[y0:y1, x0:x1], encoding='bgr8')
+        message.header.stamp = rospy.Time.now()
+        # find_object_2d reads the requested template id from frame_id. An empty
+        # frame_id asks it to choose the next available id.
+        message.header.frame_id = str(object_id) if object_id > 0 else ''
+        self.object_publisher.publish(message)
+        return object_id
 
 
 class WebHandler(BaseHTTPRequestHandler):
@@ -182,10 +176,6 @@ class WebHandler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
     def do_GET(self):
-        if self.path == '/frame.jpg':
-            with self.owner.state.lock:
-                data = self.owner.state.jpeg
-            return self._reply(503, b'No frame') if data is None else self._reply(200, data, 'image/jpeg')
         path = 'index.html' if self.path in ('/', '/index.html') else self.path.lstrip('/')
         path = os.path.abspath(os.path.join(self.owner.web_dir, path))
         if not path.startswith(self.owner.web_dir + os.sep) or not os.path.isfile(path):
