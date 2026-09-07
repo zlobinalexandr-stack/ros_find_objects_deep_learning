@@ -18,7 +18,7 @@ catkin_package(CATKIN_DEPENDS cv_bridge find_object_2d geometry_msgs rospy senso
 catkin_install_python(PROGRAMS scripts/find_object_3d_web_node
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
 
-install(DIRECTORY launch config web
+install(DIRECTORY launch config
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
 
 if(CATKIN_ENABLE_TESTING)

@@ -2,7 +2,7 @@
 <package format="2">
   <name>find_object_3d_web</name>
   <version>0.1.0</version>
-  <description>Select object templates in a browser and publish their depth-based 3D transforms.</description>
+  <description>Publish depth-based 3D transforms for find_object_2d detections received over ROS topics.</description>
   <maintainer email="maintainer@example.com">ROS Maintainer</maintainer>
   <license>BSD-3-Clause</license>
 
@@ -15,8 +15,6 @@
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
   <depend>tf2_ros</depend>
-  <exec_depend>python-opencv</exec_depend>
-  <exec_depend>rosbridge_server</exec_depend>
   <test_depend>python-nose</test_depend>
   <export/>
 </package>

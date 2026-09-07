@@ -1,19 +1,8 @@
 #!/usr/bin/env python
 from __future__ import print_function
 
-import json
-import os
 import threading
-import time
 
-try:
-    from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
-    from SocketServer import ThreadingMixIn
-except ImportError:
-    from http.server import HTTPServer, BaseHTTPRequestHandler
-    from socketserver import ThreadingMixIn
-
-import cv2
 import numpy as np
 import rospy
 from cv_bridge import CvBridge, CvBridgeError
@@ -28,17 +17,11 @@ from find_object_3d_web.geometry import parse_detections, projected_center, proj
 class SharedState(object):
     def __init__(self):
         self.lock = threading.RLock()
-        self.rgb = None
         self.rgb_shape = None
         self.depth = None
         self.depth_stamp = rospy.Time(0)
         self.depth_frame = ''
         self.camera_info = None
-        self.error = ''
-
-
-class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
-    daemon_threads = True
 
 
 class Node(object):
@@ -46,26 +29,12 @@ class Node(object):
         self.state = SharedState()
         self.bridge = CvBridge()
         self.tf_broadcaster = tf2_ros.TransformBroadcaster()
-        self.web_dir = os.path.abspath(rospy.get_param('~web_dir'))
         self.depth_scale = float(rospy.get_param('~depth_scale', 1.0))
         self.radius = int(rospy.get_param('~depth_window_radius', 4))
         self.min_depth = float(rospy.get_param('~min_depth', 0.05))
         self.max_depth = float(rospy.get_param('~max_depth', 100.0))
         self.max_depth_age = float(rospy.get_param('~max_depth_age', 0.5))
         self.frame_prefix = rospy.get_param('~object_frame_prefix', 'object_')
-        # The find_object_2d version shipped with ROS Melodic does not install a
-        # Python ``find_object_2d.srv`` module. Templates selected in the web UI
-        # are therefore sent to find_object_2d over its image input topic.
-        self.object_topic = rospy.get_param('~object_topic', '/find_object_2d/add_object')
-        # Latching keeps the latest template available while find_object_2d is
-        # starting or reconnecting; a transient lack of subscribers must not
-        # make a valid web request fail.
-        self.object_publisher = rospy.Publisher(
-            self.object_topic, sensor_msgs.msg.CompressedImage, queue_size=1, latch=True)
-        rospy.loginfo(
-            'Object template publisher: topic=%s type=%s',
-            self.object_topic, sensor_msgs.msg.CompressedImage._type)
-
         image_topic = rospy.get_param('~image_topic', '/video/image_raw')
         depth_topic = rospy.get_param('~depth_topic', '/depthnet/depth')
         info_topic = rospy.get_param('~camera_info_topic', '/video/camera_info')
@@ -80,25 +49,14 @@ class Node(object):
             info_topic, sensor_msgs.msg.CameraInfo, self.info_callback, queue_size=1)
         rospy.Subscriber(objects_topic, ObjectsStamped, self.objects_callback, queue_size=10)
 
-        node = self
-        class Handler(WebHandler):
-            owner = node
-        self.httpd = ThreadingHTTPServer((rospy.get_param('~bind_address', '0.0.0.0'),
-                                          int(rospy.get_param('~port', 8080))), Handler)
-        self.server_thread = threading.Thread(target=self.httpd.serve_forever)
-        self.server_thread.daemon = True
-        self.server_thread.start()
-        rospy.on_shutdown(self.httpd.shutdown)
-        rospy.loginfo('Object selection UI: http://%s:%d', self.httpd.server_address[0], self.httpd.server_address[1])
+        rospy.loginfo(
+            'Topic-only object localization started: detections=%s', objects_topic)
 
     def image_callback(self, msg):
-        try:
-            rgb = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
-            with self.state.lock:
-                self.state.rgb = rgb.copy()
-                self.state.rgb_shape = rgb.shape[:2]
-        except CvBridgeError as error:
-            rospy.logwarn_throttle(5, 'Cannot convert camera image: %s', error)
+        # Only the dimensions are needed to map detection coordinates to a
+        # differently sized depth image; no browser preview is produced.
+        with self.state.lock:
+            self.state.rgb_shape = (msg.height, msg.width)
 
     def depth_callback(self, msg):
         try:
@@ -172,97 +130,6 @@ class Node(object):
                     transform.child_frame_id)
         except (ValueError, TypeError) as error:
             rospy.logwarn_throttle(5, 'Invalid find_object_2d detection: %s', error)
-
-    def add_selection(self, selection):
-        with self.state.lock:
-            image = None if self.state.rgb is None else self.state.rgb.copy()
-        if image is None:
-            rospy.logerr('Cannot add object template: no camera image received')
-            raise RuntimeError('No camera image received yet')
-        try:
-            height, width = image.shape[:2]
-            x0 = max(0, min(width - 1, int(float(selection['x0']) * width)))
-            y0 = max(0, min(height - 1, int(float(selection['y0']) * height)))
-            x1 = max(x0 + 1, min(width, int(float(selection['x1']) * width)))
-            y1 = max(y0 + 1, min(height, int(float(selection['y1']) * height)))
-            object_id = int(selection.get('id', 0))
-        except (KeyError, TypeError, ValueError, OverflowError) as error:
-            rospy.logerr('Cannot add object template: invalid selection data: %s', error)
-            raise ValueError('Invalid object selection: %s' % error)
-        if (x1 - x0) < 8 or (y1 - y0) < 8:
-            rospy.logerr(
-                'Cannot add object template: selected ROI is too small: roi=(%d, %d)-(%d, %d)',
-                x0, y0, x1, y1)
-            raise ValueError('Selection must be at least 8 by 8 pixels')
-        if self.object_publisher.get_num_connections() == 0:
-            rospy.logwarn(
-                'Object template topic %s currently has no subscribers; publishing a latched '
-                'message so find_object_2d can receive it after connecting',
-                self.object_topic)
-        try:
-            encoded, jpeg = cv2.imencode('.jpg', image[y0:y1, x0:x1])
-        except (cv2.error, TypeError, ValueError) as error:
-            rospy.logerr('Cannot encode object template image as JPEG: %s', error)
-            raise RuntimeError('Could not encode selected object image: %s' % error)
-        if not encoded:
-            rospy.logerr('Cannot encode object template image as JPEG: encoder returned false')
-            raise RuntimeError('Could not encode selected object image')
-        message = sensor_msgs.msg.CompressedImage(format='jpeg', data=jpeg.tobytes())
-        message.header.stamp = rospy.Time.now()
-        # find_object_2d reads the requested template id from frame_id. An empty
-        # frame_id asks it to choose the next available id.
-        message.header.frame_id = str(object_id) if object_id > 0 else ''
-        try:
-            self.object_publisher.publish(message)
-        except rospy.ROSException as error:
-            rospy.logerr(
-                'Cannot publish object template id=%s to %s: %s',
-                str(object_id) if object_id > 0 else 'auto', self.object_topic, error)
-            raise RuntimeError('Could not publish object template: %s' % error)
-        rospy.loginfo(
-            'Object template published: id=%s roi=(%d, %d)-(%d, %d) size=%dx%d topic=%s; '
-            'the image-topic API does not confirm downstream persistence',
-            str(object_id) if object_id > 0 else 'auto', x0, y0, x1, y1,
-            x1 - x0, y1 - y0, self.object_topic)
-        return object_id
-
-
-class WebHandler(BaseHTTPRequestHandler):
-    owner = None
-
-    def log_message(self, fmt, *args):
-        rospy.logdebug(fmt, *args)
-
-    def _reply(self, code, content, content_type='application/json'):
-        self.send_response(code)
-        self.send_header('Content-Type', content_type)
-        self.send_header('Content-Length', str(len(content)))
-        self.send_header('Cache-Control', 'no-store')
-        self.end_headers()
-        self.wfile.write(content)
-
-    def do_GET(self):
-        path = 'index.html' if self.path in ('/', '/index.html') else self.path.lstrip('/')
-        path = os.path.abspath(os.path.join(self.owner.web_dir, path))
-        if not path.startswith(self.owner.web_dir + os.sep) or not os.path.isfile(path):
-            return self._reply(404, b'Not found', 'text/plain')
-        content_type = 'text/css' if path.endswith('.css') else 'application/javascript' if path.endswith('.js') else 'text/html'
-        with open(path, 'rb') as stream:
-            self._reply(200, stream.read(), content_type)
-
-    def do_POST(self):
-        if self.path != '/selection':
-            return self._reply(404, b'{"error":"Not found"}')
-        try:
-            length = min(int(self.headers.get('Content-Length', '0')), 4096)
-            selection = json.loads(self.rfile.read(length).decode('utf-8'))
-            object_id = self.owner.add_selection(selection)
-            self._reply(200, json.dumps({'ok': True, 'id': object_id}).encode('utf-8'))
-        except Exception as error:
-            rospy.logerr(
-                'Cannot process object-add request from web client %s: %s',
-                self.client_address[0], error)
-            self._reply(400, json.dumps({'ok': False, 'error': str(error)}).encode('utf-8'))
 
 
 if __name__ == '__main__':
