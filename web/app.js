@@ -27,7 +27,7 @@
     const configured = new URLSearchParams(window.location.search).get('rosbridge');
     if (configured) return configured;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${protocol}//${window.location.hostname}:9090`;
+    return `${protocol}//${window.location.hostname}:9091`;
   }
 
   if (typeof ROSLIB === 'undefined') {

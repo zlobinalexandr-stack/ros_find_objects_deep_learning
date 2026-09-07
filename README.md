@@ -47,8 +47,11 @@ source devel/setup.bash
 4. Откройте `http://<IP-робота>:8080`, обведите объект и нажмите «Добавить объект».
    Видео поступает в браузер через `roslibjs` и rosbridge из топика
    `/video/image_compressed/compressed`. Launch-файл запускает rosbridge на порту
+   `9091`, чтобы не конфликтовать с приложениями, использующими стандартный порт
    `9090`. Другой websocket можно указать в URL страницы, например
-   `?rosbridge=ws://robot:9191`. Интерфейс также подписывается через `roslibjs`
+   `?rosbridge=ws://robot:9191`. При изменении `rosbridge_port` в команде запуска
+   передайте тот же порт через параметр URL `rosbridge`. Интерфейс также
+   подписывается через `roslibjs`
    на `/objectsStamped`: под видео отображаются количество и ID объектов,
    обнаруженных в последнем сообщении.
 5. Проверьте результат:
@@ -92,8 +95,12 @@ latched-сообщение и будет передано подключивше
 roslaunch find_object_3d_web find_object_3d_web.launch \
   image_topic:=/video/image_raw depth_topic:=/depthnet/depth \
   camera_info_topic:=/video/camera_info objects_topic:=/objectsStamped \
-  object_topic:=/find_object_2d/add_object port:=8080
+  object_topic:=/find_object_2d/add_object port:=8080 rosbridge_port:=9091
 ```
+
+Например, если rosbridge должен работать на порту `9191`, запустите пакет с
+`rosbridge_port:=9191` и откройте
+`http://<IP-робота>:8080/?rosbridge=ws://<IP-робота>:9191`.
 
 Для совместимости с пакетами ROS Melodic шаблон передаётся через image-топик,
 а не через отсутствующий в этих сборках Python-модуль `find_object_2d.srv`.
