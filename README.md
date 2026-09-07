@@ -20,6 +20,7 @@ RGB-изображение, глубина берётся как медиана 
 | глубина | `sensor_msgs/Image` | `/depthnet/depth` |
 | калибровка | `sensor_msgs/CameraInfo` | `/video/camera_info` |
 | список детекций | `find_object_2d/ObjectsStamped` | `/objectsStamped` |
+| запросы добавления объектов (только логирование) | `sensor_msgs/CompressedImage` | `/find_object_2d/add_object` |
 
 Эталон объекта следует публиковать непосредственно для `find_object_2d`:
 
@@ -30,7 +31,35 @@ RGB-изображение, глубина берётся как медиана 
 JPEG-изображение эталона передаётся в поле `data`. Чтобы запросить конкретный ID,
 укажите его десятичной строкой в `header.frame_id`; пустой `frame_id` позволяет
 `find_object_2d` выбрать следующий ID. Данный пакет не дублирует и не проксирует
-этот топик.
+этот топик. Узел подписывается на него только для диагностики: при каждом запросе
+в INFO-лог выводятся запрошенный ID (или `<automatic>`), формат и размер
+изображения, а также имя публикующего узла. Этот лог подтверждает доставку
+сообщения диагностическому узлу, но сам по себе **не подтверждает**, что
+`find_object_2d` успешно создал эталон: протокол топика не предусматривает ответа.
+
+Если в `header.frame_id` указан десятичный ID, узел запоминает запрос. Первое
+обнаружение того же ID в `/objectsStamped` создаёт отдельный INFO-лог
+`Template processing confirmed by first detection`. Он является сквозным
+подтверждением того, что эталон участвует в детекции. При автоматическом ID
+сопоставить запрос и обнаружение невозможно, поэтому для отладки рекомендуется
+всегда задавать ID явно. До первого обнаружения `/objectsStamped` может оставаться
+пустым: этот топик содержит результаты детекции, а не список загруженных эталонов.
+
+Проверить, что непосредственно `find_object_2d` подключён к топику загрузки,
+можно командой:
+
+```bash
+rostopic info /find_object_2d/add_object
+```
+
+В разделе `Subscribers` должен присутствовать узел `find_object_2d`. Полные поля
+заголовка доступны при включённом уровне DEBUG, например:
+
+```bash
+rosconsole set /find_object_3d_web ros.find_object_3d_web debug
+```
+
+Пустое изображение дополнительно отмечается предупреждением.
 
 Список обнаруженных объектов доступен только как ROS-сообщение:
 
@@ -99,7 +128,8 @@ source devel/setup.bash
 ```bash
 roslaunch find_object_3d_web find_object_3d_web.launch \
   image_topic:=/video/image_raw depth_topic:=/depthnet/depth \
-  camera_info_topic:=/video/camera_info objects_topic:=/objectsStamped
+  camera_info_topic:=/video/camera_info objects_topic:=/objectsStamped \
+  add_object_topic:=/find_object_2d/add_object
 ```
 
 После обновления пакета пересоберите workspace и повторно загрузите окружение:
