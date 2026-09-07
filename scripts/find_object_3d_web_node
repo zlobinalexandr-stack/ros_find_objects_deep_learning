@@ -22,6 +22,7 @@ class SharedState(object):
         self.depth_stamp = rospy.Time(0)
         self.depth_frame = ''
         self.camera_info = None
+        self.pending_object_ids = {}
 
 
 class Node(object):
@@ -68,8 +69,9 @@ class Node(object):
         publisher = connection_header.get('callerid', '<unknown>')
 
         rospy.loginfo(
-            'New object add request received: requested_id=%s format=%s bytes=%d '
-            'publisher=%s',
+            'Object template upload observed: requested_id=%s format=%s bytes=%d '
+            'publisher=%s (delivery to this monitor only; awaiting a detection from '
+            'find_object_2d)',
             object_id, msg.format or '<unspecified>', payload_size, publisher)
         rospy.logdebug(
             'Add-object message details: stamp=%s frame_id=%r format=%r bytes=%d '
@@ -78,6 +80,26 @@ class Node(object):
 
         if not payload_size:
             rospy.logwarn('New object add request contains an empty image payload')
+            return
+
+        if requested_id:
+            try:
+                requested_id = int(requested_id)
+            except ValueError:
+                rospy.logwarn(
+                    'Cannot track template confirmation: frame_id=%r is not a decimal '
+                    'object ID', msg.header.frame_id)
+            else:
+                with self.state.lock:
+                    self.state.pending_object_ids[requested_id] = rospy.Time.now()
+                rospy.loginfo(
+                    'Template id=%d is pending confirmation; its first occurrence in '
+                    '/objectsStamped will confirm that detection is active', requested_id)
+        else:
+            rospy.logwarn(
+                'Template uses an automatically assigned ID; this node cannot correlate '
+                'it with /objectsStamped. Set header.frame_id to a decimal ID for '
+                'end-to-end confirmation')
 
     def image_callback(self, msg):
         # Only the dimensions are needed to map detection coordinates to a
@@ -100,6 +122,21 @@ class Node(object):
             self.state.camera_info = msg
 
     def objects_callback(self, msg):
+        try:
+            detections = list(parse_detections(msg.objects.data))
+        except (ValueError, TypeError) as error:
+            rospy.logwarn_throttle(5, 'Invalid find_object_2d detection: %s', error)
+            return
+
+        now = rospy.Time.now()
+        with self.state.lock:
+            for object_id, _, _, _ in detections:
+                requested_at = self.state.pending_object_ids.pop(object_id, None)
+                if requested_at is not None:
+                    rospy.loginfo(
+                        'Template processing confirmed by first detection: id=%d '
+                        'elapsed=%.3fs', object_id, (now - requested_at).to_sec())
+
         with self.state.lock:
             depth = None if self.state.depth is None else self.state.depth.copy()
             info = self.state.camera_info
@@ -119,7 +156,6 @@ class Node(object):
             rospy.logwarn_throttle(5, 'Ignoring detection: depth/image time difference is too large')
             return
         try:
-            detections = parse_detections(msg.objects.data)
             for object_id, width, height, homography in detections:
                 u, v = projected_center(width, height, homography)
                 # find_object_2d coordinates refer to RGB; map them when DepthNet has another resolution.
