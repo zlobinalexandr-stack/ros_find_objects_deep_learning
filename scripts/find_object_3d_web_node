@@ -39,6 +39,8 @@ class Node(object):
         depth_topic = rospy.get_param('~depth_topic', '/depthnet/depth')
         info_topic = rospy.get_param('~camera_info_topic', '/video/camera_info')
         objects_topic = rospy.get_param('~objects_topic', '/objectsStamped')
+        add_object_topic = rospy.get_param(
+            '~add_object_topic', '/find_object_2d/add_object')
         rospy.Subscriber(
             image_topic, sensor_msgs.msg.Image, self.image_callback,
             queue_size=1, buff_size=2 ** 24)
@@ -48,9 +50,34 @@ class Node(object):
         rospy.Subscriber(
             info_topic, sensor_msgs.msg.CameraInfo, self.info_callback, queue_size=1)
         rospy.Subscriber(objects_topic, ObjectsStamped, self.objects_callback, queue_size=10)
+        # Observe add requests for diagnostics only. find_object_2d remains the
+        # consumer of this topic; subscribing here does not proxy or alter them.
+        rospy.Subscriber(
+            add_object_topic, sensor_msgs.msg.CompressedImage,
+            self.add_object_callback, queue_size=10)
 
         rospy.loginfo(
-            'Topic-only object localization started: detections=%s', objects_topic)
+            'Topic-only object localization started: detections=%s add_object=%s',
+            objects_topic, add_object_topic)
+
+    def add_object_callback(self, msg):
+        requested_id = msg.header.frame_id.strip()
+        object_id = requested_id if requested_id else '<automatic>'
+        payload_size = len(msg.data)
+        connection_header = getattr(msg, '_connection_header', None) or {}
+        publisher = connection_header.get('callerid', '<unknown>')
+
+        rospy.loginfo(
+            'New object add request received: requested_id=%s format=%s bytes=%d '
+            'publisher=%s',
+            object_id, msg.format or '<unspecified>', payload_size, publisher)
+        rospy.logdebug(
+            'Add-object message details: stamp=%s frame_id=%r format=%r bytes=%d '
+            'publisher=%s',
+            msg.header.stamp, msg.header.frame_id, msg.format, payload_size, publisher)
+
+        if not payload_size:
+            rospy.logwarn('New object add request contains an empty image payload')
 
     def image_callback(self, msg):
         # Only the dimensions are needed to map detection coordinates to a
