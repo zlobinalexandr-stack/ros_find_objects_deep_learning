@@ -3,6 +3,7 @@
   <arg name="depth_topic" default="/depthnet/depth"/>
   <arg name="camera_info_topic" default="/video/camera_info"/>
   <arg name="objects_topic" default="/objectsStamped"/>
+  <arg name="add_object_topic" default="/find_object_2d/add_object"/>
 
   <!-- Run find_object_2d separately with the same RGB image topic. -->
   <node pkg="find_object_3d_web" type="find_object_3d_web_node" name="find_object_3d_web" output="screen">
@@ -11,5 +12,6 @@
     <param name="depth_topic" value="$(arg depth_topic)"/>
     <param name="camera_info_topic" value="$(arg camera_info_topic)"/>
     <param name="objects_topic" value="$(arg objects_topic)"/>
+    <param name="add_object_topic" value="$(arg add_object_topic)"/>
   </node>
 </launch>

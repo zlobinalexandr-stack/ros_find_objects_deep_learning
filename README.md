@@ -20,6 +20,7 @@ RGB-изображение, глубина берётся как медиана 
 | глубина | `sensor_msgs/Image` | `/depthnet/depth` |
 | калибровка | `sensor_msgs/CameraInfo` | `/video/camera_info` |
 | список детекций | `find_object_2d/ObjectsStamped` | `/objectsStamped` |
+| запросы добавления объектов (только логирование) | `sensor_msgs/CompressedImage` | `/find_object_2d/add_object` |
 
 Эталон объекта следует публиковать непосредственно для `find_object_2d`:
 
@@ -30,7 +31,16 @@ RGB-изображение, глубина берётся как медиана 
 JPEG-изображение эталона передаётся в поле `data`. Чтобы запросить конкретный ID,
 укажите его десятичной строкой в `header.frame_id`; пустой `frame_id` позволяет
 `find_object_2d` выбрать следующий ID. Данный пакет не дублирует и не проксирует
-этот топик.
+этот топик. Узел подписывается на него только для диагностики: при каждом запросе
+в INFO-лог выводятся запрошенный ID (или `<automatic>`), формат и размер
+изображения, а также имя публикующего узла. Полные поля заголовка доступны при
+включённом уровне DEBUG, например:
+
+```bash
+rosconsole set /find_object_3d_web ros.find_object_3d_web debug
+```
+
+Пустое изображение дополнительно отмечается предупреждением.
 
 Список обнаруженных объектов доступен только как ROS-сообщение:
 
@@ -99,7 +109,8 @@ source devel/setup.bash
 ```bash
 roslaunch find_object_3d_web find_object_3d_web.launch \
   image_topic:=/video/image_raw depth_topic:=/depthnet/depth \
-  camera_info_topic:=/video/camera_info objects_topic:=/objectsStamped
+  camera_info_topic:=/video/camera_info objects_topic:=/objectsStamped \
+  add_object_topic:=/find_object_2d/add_object
 ```
 
 После обновления пакета пересоберите workspace и повторно загрузите окружение:
