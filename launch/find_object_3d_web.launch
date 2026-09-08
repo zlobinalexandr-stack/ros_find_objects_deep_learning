@@ -5,7 +5,10 @@
   <arg name="objects_topic" default="/objectsStamped"/>
   <arg name="add_object_topic" default="/find_object_2d/add_object"/>
 
-  <!-- Run find_object_2d separately with the same RGB image topic. -->
+  <node pkg="find_object_2d" type="find_object_2d" name="find_object_2d" output="screen">
+    <remap from="image" to="$(arg image_topic)"/>
+  </node>
+
   <node pkg="find_object_3d_web" type="find_object_3d_web_node" name="find_object_3d_web" output="screen">
     <rosparam command="load" file="$(find find_object_3d_web)/config/default.yaml"/>
     <param name="image_topic" value="$(arg image_topic)"/>
