@@ -13,7 +13,8 @@ RGB-изображение, глубина берётся как медиана 
 ## Интерфейс ROS-ноды
 
 `find_object_3d_web` не имеет HTTP-интерфейса, сервисов и actions. Он принимает
-пять ROS-топиков и публикует результат в стандартный TF-топик `/tf`.
+ROS-топики, публикует реестр шаблонов и выдаёт результат в стандартный TF-топик
+`/tf`.
 
 | Направление | Назначение | Тип | Имя по умолчанию |
 |---|---|---|---|
@@ -21,13 +22,16 @@ RGB-изображение, глубина берётся как медиана 
 | вход | карта глубины | `sensor_msgs/Image` | `/depthnet/depth` |
 | вход | параметры камеры | `sensor_msgs/CameraInfo` | `/video/camera_info` |
 | вход | двумерные обнаружения | `find_object_2d/ObjectsStamped` | `/objectsStamped` |
-| вход, мониторинг | загрузка эталона | `sensor_msgs/CompressedImage` | `/find_object_2d/add_object` |
+| вход | загрузка и сохранение эталона | `sensor_msgs/CompressedImage` | `/find_object_2d/add_object` |
+| вход | удаление сохранённого эталона | `std_msgs/Int32` | `/find_object_3d_web/remove_object` |
+| выход, latched | список сохранённых ID | `std_msgs/Int32MultiArray` | `/find_object_3d_web/objects` |
 | выход | положение обнаруженного объекта | `tf2_msgs/TFMessage` | `/tf` |
 
-Топик `/find_object_2d/add_object` принадлежит `find_object_2d`: данная нода
-подписана на него параллельно только для логирования и не пересылает сообщение.
-Все имена входов можно переопределить аргументами launch-файла. `/tf`
-переназначать обычно не требуется.
+Нода сохраняет каждый принятый эталон на диске, назначает ID для запросов с
+пустым `header.frame_id` и пересылает нормализованное сообщение во внутренний
+топик детектора. При следующем запуске сохранённые эталоны автоматически снова
+загружаются в `find_object_2d`. Все имена входов можно переопределить аргументами
+launch-файла. `/tf` переназначать обычно не требуется.
 
 ### Общие команды для просмотра
 
@@ -150,20 +154,40 @@ rospy.sleep(1.0)
 rostopic info /find_object_2d/add_object
 ```
 
-В `Subscribers` должны присутствовать и `find_object_2d`, и
-`find_object_3d_web`. Лог `Object template upload observed` подтверждает только
-доставку диагностическому узлу: протокол этого топика не содержит ответа от
-`find_object_2d`. Пустой `data` отмечается предупреждением.
+В `Subscribers` должен присутствовать `find_object_3d_web`: он сохраняет шаблон
+и затем пересылает его запущенному из launch-файла детектору. Пустой `data`
+отмечается предупреждением и не сохраняется.
 
-Для явного ID нода запоминает запрос. Первое обнаружение того же ID в
+Для каждого сохранённого ID нода запоминает запрос. Первое обнаружение того же ID в
 `/objectsStamped` создаёт лог `Template processing confirmed by first detection`
-— это сквозное подтверждение участия эталона в детекции. Автоматический ID
-сопоставить с запросом невозможно. Подробный лог входного сообщения включается
-командой:
+— это сквозное подтверждение участия эталона в детекции. При пустом
+`header.frame_id` назначается наименьший свободный неотрицательный ID. Подробный
+лог входного сообщения включается командой:
 
 ```bash
 rosconsole set /find_object_3d_web ros.find_object_3d_web debug
 ```
+
+### Список и удаление сохранённых эталонов
+
+Полный отсортированный список ID публикуется latched-сообщением, поэтому новый
+подписчик сразу получает актуальное состояние:
+
+```bash
+rostopic echo -n 1 /find_object_3d_web/objects
+```
+
+Тип топика — `std_msgs/Int32MultiArray`, например `data: [0, 2, 7]`. Чтобы
+удалить ID `7` с диска и из работающего `find_object_2d`, опубликуйте:
+
+```bash
+rostopic pub -1 /find_object_3d_web/remove_object std_msgs/Int32 "data: 7"
+```
+
+После добавления или удаления список публикуется заново. По умолчанию файлы
+хранятся в `~/.ros/find_object_3d_web/objects`; каталог изменяется параметром
+`storage_directory` в `config/default.yaml`. Удаление отсутствующего или
+отрицательного ID отклоняется.
 
 ### `/objectsStamped` — двумерные обнаружения
 
@@ -256,24 +280,19 @@ source devel/setup.bash
 ## Запуск
 
 1. Запустите камеру и `ros_deep_learning` DepthNet.
-2. Запустите `find_object_2d` на **том же RGB-изображении**, которое передано
-   этому пакету:
-
-   ```bash
-   rosrun find_object_2d find_object_2d image:=/video/image_raw
-   ```
-
-3. Запустите узел локализации:
+2. Запустите launch-файл. Он запустит `find_object_2d` на **том же
+   RGB-изображении**, которое передано узлу локализации, а затем запустит
+   `find_object_3d_web`:
 
    ```bash
    roslaunch find_object_3d_web find_object_3d_web.launch
    ```
 
-4. Передайте JPEG-эталон сообщением `sensor_msgs/CompressedImage` в
+3. Передайте JPEG-эталон сообщением `sensor_msgs/CompressedImage` в
    `/find_object_2d/add_object` из собственного ROS-узла и читайте результаты из
    `/objectsStamped`.
 
-5. Проверьте трёхмерный результат:
+4. Проверьте трёхмерный результат:
 
    ```bash
    rostopic echo /objectsStamped
@@ -286,7 +305,9 @@ source devel/setup.bash
 roslaunch find_object_3d_web find_object_3d_web.launch \
   image_topic:=/video/image_raw depth_topic:=/depthnet/depth \
   camera_info_topic:=/video/camera_info objects_topic:=/objectsStamped \
-  add_object_topic:=/find_object_2d/add_object
+  add_object_topic:=/find_object_2d/add_object \
+  remove_object_topic:=/find_object_3d_web/remove_object \
+  object_list_topic:=/find_object_3d_web/objects
 ```
 
 После обновления пакета пересоберите workspace и повторно загрузите окружение:

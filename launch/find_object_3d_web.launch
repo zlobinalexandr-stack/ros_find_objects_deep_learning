@@ -4,8 +4,17 @@
   <arg name="camera_info_topic" default="/video/camera_info"/>
   <arg name="objects_topic" default="/objectsStamped"/>
   <arg name="add_object_topic" default="/find_object_2d/add_object"/>
+  <arg name="remove_object_topic" default="/find_object_3d_web/remove_object"/>
+  <arg name="object_list_topic" default="/find_object_3d_web/objects"/>
+  <arg name="detector_add_topic" default="/find_object_3d_web/detector/add_object"/>
+  <arg name="detector_remove_topic" default="/find_object_3d_web/detector/remove_object"/>
 
-  <!-- Run find_object_2d separately with the same RGB image topic. -->
+  <node pkg="find_object_2d" type="find_object_2d" name="find_object_2d" output="screen">
+    <remap from="image" to="$(arg image_topic)"/>
+    <remap from="/find_object_2d/add_object" to="$(arg detector_add_topic)"/>
+    <remap from="/find_object_2d/remove_object" to="$(arg detector_remove_topic)"/>
+  </node>
+
   <node pkg="find_object_3d_web" type="find_object_3d_web_node" name="find_object_3d_web" output="screen">
     <rosparam command="load" file="$(find find_object_3d_web)/config/default.yaml"/>
     <param name="image_topic" value="$(arg image_topic)"/>
@@ -13,5 +22,9 @@
     <param name="camera_info_topic" value="$(arg camera_info_topic)"/>
     <param name="objects_topic" value="$(arg objects_topic)"/>
     <param name="add_object_topic" value="$(arg add_object_topic)"/>
+    <param name="remove_object_topic" value="$(arg remove_object_topic)"/>
+    <param name="object_list_topic" value="$(arg object_list_topic)"/>
+    <param name="detector_add_topic" value="$(arg detector_add_topic)"/>
+    <param name="detector_remove_topic" value="$(arg detector_remove_topic)"/>
   </node>
 </launch>
