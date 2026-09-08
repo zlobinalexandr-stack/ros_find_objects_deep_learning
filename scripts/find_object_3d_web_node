@@ -12,6 +12,8 @@ import sensor_msgs.msg
 import tf2_ros
 
 from find_object_3d_web.geometry import parse_detections, projected_center, project_pixel, robust_depth
+from find_object_3d_web.object_store import ObjectStore
+from std_msgs.msg import Int32, Int32MultiArray
 
 
 class SharedState(object):
@@ -36,12 +38,29 @@ class Node(object):
         self.max_depth = float(rospy.get_param('~max_depth', 100.0))
         self.max_depth_age = float(rospy.get_param('~max_depth_age', 0.5))
         self.frame_prefix = rospy.get_param('~object_frame_prefix', 'object_')
+        storage_directory = rospy.get_param(
+            '~storage_directory', '~/.ros/find_object_3d_web/objects')
+        self.store = ObjectStore(storage_directory)
         image_topic = rospy.get_param('~image_topic', '/video/image_raw')
         depth_topic = rospy.get_param('~depth_topic', '/depthnet/depth')
         info_topic = rospy.get_param('~camera_info_topic', '/video/camera_info')
         objects_topic = rospy.get_param('~objects_topic', '/objectsStamped')
         add_object_topic = rospy.get_param(
             '~add_object_topic', '/find_object_2d/add_object')
+        remove_object_topic = rospy.get_param(
+            '~remove_object_topic', '/find_object_3d_web/remove_object')
+        object_list_topic = rospy.get_param(
+            '~object_list_topic', '/find_object_3d_web/objects')
+        detector_add_topic = rospy.get_param(
+            '~detector_add_topic', '/find_object_3d_web/detector/add_object')
+        detector_remove_topic = rospy.get_param(
+            '~detector_remove_topic', '/find_object_3d_web/detector/remove_object')
+        self.detector_add_publisher = rospy.Publisher(
+            detector_add_topic, sensor_msgs.msg.CompressedImage, queue_size=10)
+        self.detector_remove_publisher = rospy.Publisher(
+            detector_remove_topic, Int32, queue_size=10)
+        self.object_list_publisher = rospy.Publisher(
+            object_list_topic, Int32MultiArray, queue_size=1, latch=True)
         rospy.Subscriber(
             image_topic, sensor_msgs.msg.Image, self.image_callback,
             queue_size=1, buff_size=2 ** 24)
@@ -51,28 +70,33 @@ class Node(object):
         rospy.Subscriber(
             info_topic, sensor_msgs.msg.CameraInfo, self.info_callback, queue_size=1)
         rospy.Subscriber(objects_topic, ObjectsStamped, self.objects_callback, queue_size=10)
-        # Observe add requests for diagnostics only. find_object_2d remains the
-        # consumer of this topic; subscribing here does not proxy or alter them.
+        # Own the public management topics so templates can be persisted before
+        # normalized requests are forwarded to find_object_2d.
         rospy.Subscriber(
             add_object_topic, sensor_msgs.msg.CompressedImage,
             self.add_object_callback, queue_size=10)
+        rospy.Subscriber(remove_object_topic, Int32, self.remove_object_callback, queue_size=10)
+
+        self.publish_object_list()
+        self.restore_timer = rospy.Timer(rospy.Duration(0.2), self.restore_objects)
 
         rospy.loginfo(
-            'Topic-only object localization started: detections=%s add_object=%s',
-            objects_topic, add_object_topic)
+            'Topic-only object localization started: detections=%s add_object=%s '
+            'remove_object=%s object_list=%s storage=%s',
+            objects_topic, add_object_topic, remove_object_topic, object_list_topic,
+            self.store.directory)
 
     def add_object_callback(self, msg):
         requested_id = msg.header.frame_id.strip()
-        object_id = requested_id if requested_id else '<automatic>'
         payload_size = len(msg.data)
         connection_header = getattr(msg, '_connection_header', None) or {}
         publisher = connection_header.get('callerid', '<unknown>')
 
         rospy.loginfo(
             'Object template upload observed: requested_id=%s format=%s bytes=%d '
-            'publisher=%s (delivery to this monitor only; awaiting a detection from '
-            'find_object_2d)',
-            object_id, msg.format or '<unspecified>', payload_size, publisher)
+            'publisher=%s',
+            requested_id or '<automatic>', msg.format or '<unspecified>', payload_size,
+            publisher)
         rospy.logdebug(
             'Add-object message details: stamp=%s frame_id=%r format=%r bytes=%d '
             'publisher=%s',
@@ -82,24 +106,70 @@ class Node(object):
             rospy.logwarn('New object add request contains an empty image payload')
             return
 
-        if requested_id:
+        with self.state.lock:
             try:
-                requested_id = int(requested_id)
+                object_id = int(requested_id) if requested_id else self.store.allocate_id()
+                if object_id < 0:
+                    raise ValueError()
             except ValueError:
                 rospy.logwarn(
-                    'Cannot track template confirmation: frame_id=%r is not a decimal '
-                    'object ID', msg.header.frame_id)
-            else:
+                    'Cannot add template: frame_id=%r is not a non-negative decimal object ID',
+                    msg.header.frame_id)
+                return
+
+            try:
+                self.store.save(object_id, msg.format, msg.data)
+            except (IOError, OSError, ValueError) as error:
+                rospy.logerr('Cannot persist template id=%d: %s', object_id, error)
+                return
+            self.state.pending_object_ids[object_id] = rospy.Time.now()
+
+        msg.header.frame_id = str(object_id)
+        self.detector_add_publisher.publish(msg)
+        self.publish_object_list()
+        rospy.loginfo(
+            'Template id=%d saved and forwarded to find_object_2d; its first occurrence '
+            'in /objectsStamped will confirm that detection is active', object_id)
+
+    def remove_object_callback(self, msg):
+        object_id = int(msg.data)
+        if object_id < 0:
+            rospy.logwarn('Cannot remove template: id=%d is negative', object_id)
+            return
+        with self.state.lock:
+            if not self.store.remove(object_id):
+                rospy.logwarn('Cannot remove template id=%d: it is not stored', object_id)
+                return
+            self.state.pending_object_ids.pop(object_id, None)
+        self.detector_remove_publisher.publish(Int32(data=object_id))
+        self.publish_object_list()
+        rospy.loginfo('Template id=%d removed from storage and find_object_2d', object_id)
+
+    def publish_object_list(self):
+        with self.state.lock:
+            object_ids = self.store.ids()
+        self.object_list_publisher.publish(Int32MultiArray(data=object_ids))
+
+    def restore_objects(self, event):
+        if self.detector_add_publisher.get_num_connections() == 0:
+            return
+        self.restore_timer.shutdown()
+        with self.state.lock:
+            object_ids = self.store.ids()
+        for object_id in object_ids:
+            try:
                 with self.state.lock:
-                    self.state.pending_object_ids[requested_id] = rospy.Time.now()
-                rospy.loginfo(
-                    'Template id=%d is pending confirmation; its first occurrence in '
-                    '/objectsStamped will confirm that detection is active', requested_id)
-        else:
-            rospy.logwarn(
-                'Template uses an automatically assigned ID; this node cannot correlate '
-                'it with /objectsStamped. Set header.frame_id to a decimal ID for '
-                'end-to-end confirmation')
+                    image_format, data = self.store.load(object_id)
+            except (IOError, OSError, ValueError) as error:
+                rospy.logerr('Cannot restore template id=%d: %s', object_id, error)
+                continue
+            message = sensor_msgs.msg.CompressedImage()
+            message.header.stamp = rospy.Time.now()
+            message.header.frame_id = str(object_id)
+            message.format = image_format
+            message.data = data
+            self.detector_add_publisher.publish(message)
+            rospy.loginfo('Restored template id=%d into find_object_2d', object_id)
 
     def image_callback(self, msg):
         # Only the dimensions are needed to map detection coordinates to a
