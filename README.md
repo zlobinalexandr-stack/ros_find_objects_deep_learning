@@ -256,24 +256,19 @@ source devel/setup.bash
 ## Запуск
 
 1. Запустите камеру и `ros_deep_learning` DepthNet.
-2. Запустите `find_object_2d` на **том же RGB-изображении**, которое передано
-   этому пакету:
-
-   ```bash
-   rosrun find_object_2d find_object_2d image:=/video/image_raw
-   ```
-
-3. Запустите узел локализации:
+2. Запустите launch-файл. Он запустит `find_object_2d` на **том же
+   RGB-изображении**, которое передано узлу локализации, а затем запустит
+   `find_object_3d_web`:
 
    ```bash
    roslaunch find_object_3d_web find_object_3d_web.launch
    ```
 
-4. Передайте JPEG-эталон сообщением `sensor_msgs/CompressedImage` в
+3. Передайте JPEG-эталон сообщением `sensor_msgs/CompressedImage` в
    `/find_object_2d/add_object` из собственного ROS-узла и читайте результаты из
    `/objectsStamped`.
 
-5. Проверьте трёхмерный результат:
+4. Проверьте трёхмерный результат:
 
    ```bash
    rostopic echo /objectsStamped
