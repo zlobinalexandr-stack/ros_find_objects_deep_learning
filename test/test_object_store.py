@@ -30,6 +30,21 @@ class ObjectStoreTest(unittest.TestCase):
         self.store.save(3, 'png', b'three')
         self.assertEqual(2, self.store.allocate_id())
 
+    def test_resolves_find_object_automatic_id_markers(self):
+        self.store.save(1, 'jpeg', b'one')
+
+        self.assertEqual(2, self.store.resolve_requested_id(''))
+        self.assertEqual(2, self.store.resolve_requested_id('0'))
+        self.assertEqual(2, self.store.resolve_requested_id(' 0 '))
+
+    def test_resolves_explicit_positive_id(self):
+        self.assertEqual(7, self.store.resolve_requested_id(' 7 '))
+
+    def test_rejects_invalid_requested_id(self):
+        for requested_id in ('-1', 'object'):
+            with self.assertRaises(ValueError):
+                self.store.resolve_requested_id(requested_id)
+
     def test_rejects_negative_id(self):
         with self.assertRaises(ValueError):
             self.store.save(-1, 'jpeg', b'image')

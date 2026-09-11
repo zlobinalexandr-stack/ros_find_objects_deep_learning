@@ -54,8 +54,9 @@ class SessionManager(object):
         return [executable] + remappings
 
     def start(self):
-        self.generate()
-        self.process = subprocess.Popen(self.detector_command())
+        with self.lock:
+            self.generate()
+            self.process = subprocess.Popen(self.detector_command())
 
     def stop(self):
         with self.lock:
@@ -82,8 +83,15 @@ class SessionManager(object):
         self.start()
         rate = rospy.Rate(2)
         while not rospy.is_shutdown():
-            if self.process.poll() is not None:
-                rospy.logerr('find_object_2d exited with code %d', self.process.returncode)
+            # reload_callback intentionally stops the current detector before
+            # replacing it.  Poll under the same lock so that this loop cannot
+            # mistake that intermediate, clean exit for an unexpected failure
+            # and terminate the session manager while the reload is in flight.
+            with self.lock:
+                process = self.process
+                returncode = None if process is None else process.poll()
+            if returncode is not None:
+                rospy.logerr('find_object_2d exited with code %d', returncode)
                 return
             rate.sleep()
 
