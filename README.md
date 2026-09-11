@@ -374,8 +374,27 @@ RGB/depth-топиками; однако без детектора `/objectsStam
 После обновления пакета пересоберите workspace и повторно загрузите окружение:
 
 ```bash
-catkin_make && source devel/setup.bash
+catkin_make --force-cmake && source devel/setup.bash
 ```
+
+Если CMake после обновления всё ещё упоминает удалённую цель
+`find_object_session_generator`, используется старый исходный файл или кэш
+предыдущей сборки. В актуальном `CMakeLists.txt` такой цели нет. Проверьте commit и
+очистите кэш пакета:
+
+```bash
+git -C ~/myrobot/src/ros_find_objects_deep_learning rev-parse --short HEAD
+grep -n find_object_session_generator \
+  ~/myrobot/src/ros_find_objects_deep_learning/CMakeLists.txt
+rm -rf ~/myrobot/build/ros_find_objects_deep_learning
+cd ~/myrobot
+catkin_make --force-cmake
+source devel/setup.bash
+```
+
+Команда `grep` не должна ничего вывести. Если ошибка сохраняется, удалите общие
+каталоги `build` и `devel` workspace и выполните полную сборку заново; это также
+пересоздаст верхнеуровневый кэш catkin.
 
 ## Важные условия
 
