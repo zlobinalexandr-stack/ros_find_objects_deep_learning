@@ -67,7 +67,7 @@ class Node(object):
             info_topic, sensor_msgs.msg.CameraInfo, self.info_callback, queue_size=1)
         rospy.Subscriber(objects_topic, ObjectsStamped, self.objects_callback, queue_size=10)
         # Own the public management topics so templates can be persisted before
-        # the native find_object_2d session is rebuilt.
+        # the find_object_2d objects directory is rebuilt.
         rospy.Subscriber(
             add_object_topic, sensor_msgs.msg.CompressedImage,
             self.add_object_callback, queue_size=10)
@@ -123,7 +123,7 @@ class Node(object):
         self.detector_reload_publisher.publish(Empty())
         self.publish_object_list()
         rospy.loginfo(
-            'Template id=%d saved; find_object_2d session reload requested; its first occurrence '
+            'Template id=%d saved; find_object_2d reload requested; its first occurrence '
             'in /objectsStamped will confirm that detection is active', object_id)
 
     def remove_object_callback(self, msg):
@@ -138,7 +138,7 @@ class Node(object):
             self.state.pending_object_ids.pop(object_id, None)
         self.detector_reload_publisher.publish(Empty())
         self.publish_object_list()
-        rospy.loginfo('Template id=%d removed; find_object_2d session reload requested', object_id)
+        rospy.loginfo('Template id=%d removed; find_object_2d reload requested', object_id)
 
     def publish_object_list(self):
         with self.state.lock:

@@ -3,6 +3,7 @@ from __future__ import print_function
 import fcntl
 import json
 import os
+import shutil
 
 
 class ObjectStore(object):
@@ -63,6 +64,28 @@ class ObjectStore(object):
             except OSError:
                 pass
         return removed
+
+    def export_images(self, directory):
+        """Write detector-readable image files, preserving their numeric names."""
+        directory = os.path.abspath(os.path.expanduser(directory))
+        if os.path.isdir(directory):
+            shutil.rmtree(directory)
+        os.makedirs(directory)
+        for object_id in self.ids():
+            image_format, data = self.load(object_id)
+            extension = self._image_extension(image_format, data)
+            path = os.path.join(directory, '%08d.%s' % (object_id, extension))
+            self._atomic_write(path, data, binary=True)
+
+    @staticmethod
+    def _image_extension(image_format, data):
+        image_format = (image_format or '').lower().split(';', 1)[0].strip()
+        if 'png' in image_format or data.startswith(b'\x89PNG\r\n\x1a\n'):
+            return 'png'
+        if ('jpeg' in image_format or 'jpg' in image_format or
+                data.startswith(b'\xff\xd8')):
+            return 'jpg'
+        raise ValueError('unsupported compressed image format %r' % image_format)
 
     @staticmethod
     def _validate_id(object_id):

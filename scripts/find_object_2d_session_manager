@@ -3,6 +3,7 @@ from __future__ import print_function
 
 import os
 import signal
+import shutil
 import subprocess
 import sys
 import threading
@@ -17,8 +18,8 @@ class SessionManager(object):
     def __init__(self):
         self.storage = os.path.abspath(os.path.expanduser(
             rospy.get_param('~storage_directory')))
-        self.session = os.path.abspath(os.path.expanduser(
-            rospy.get_param('~session_path')))
+        self.detector_objects = os.path.abspath(os.path.expanduser(
+            rospy.get_param('~detector_objects_path')))
         self.gui = rospy.get_param('~gui', False)
         self.lock = threading.Lock()
         self.process = None
@@ -30,23 +31,15 @@ class SessionManager(object):
     def generate(self):
         if not os.path.isdir(self.storage):
             os.makedirs(self.storage)
-        ObjectStore(self.storage)
-        if not any(name.endswith('.image') for name in os.listdir(self.storage)):
-            if os.path.exists(self.session):
-                os.remove(self.session)
-            return
-        parent = os.path.dirname(self.session)
+        store = ObjectStore(self.storage)
+        parent = os.path.dirname(self.detector_objects)
         if parent and not os.path.isdir(parent):
             os.makedirs(parent)
-        generator = roslib.packages.find_node(
-            'find_object_3d_web', 'find_object_session_generator')[0]
-        temporary_session = self.session + '.tmp'
-        try:
-            subprocess.check_call([generator, self.storage, temporary_session])
-            os.rename(temporary_session, self.session)
-        finally:
-            if os.path.exists(temporary_session):
-                os.remove(temporary_session)
+        temporary_directory = self.detector_objects + '.tmp'
+        store.export_images(temporary_directory)
+        if os.path.isdir(self.detector_objects):
+            shutil.rmtree(self.detector_objects)
+        os.rename(temporary_directory, self.detector_objects)
 
     def detector_command(self):
         executable = roslib.packages.find_node('find_object_2d', 'find_object_2d')[0]
@@ -57,8 +50,7 @@ class SessionManager(object):
             '__name:=find_object_2d',
             '_gui:=%s' % ('true' if self.gui else 'false'),
         ])
-        if os.path.isfile(self.session):
-            remappings.append('_session_path:=%s' % self.session)
+        remappings.append('_objects_path:=%s' % self.detector_objects)
         return [executable] + remappings
 
     def start(self):
@@ -80,9 +72,11 @@ class SessionManager(object):
             try:
                 self.generate()
                 self.process = subprocess.Popen(self.detector_command())
-                rospy.loginfo('Reloaded find_object_2d from session %s', self.session)
+                rospy.loginfo(
+                    'Reloaded find_object_2d from objects path %s',
+                    self.detector_objects)
             except (OSError, subprocess.CalledProcessError) as error:
-                rospy.logerr('Cannot rebuild find_object_2d session: %s', error)
+                rospy.logerr('Cannot rebuild find_object_2d objects path: %s', error)
 
     def spin(self):
         self.start()

@@ -50,6 +50,23 @@ class ObjectStoreTest(unittest.TestCase):
         self.assertEqual(('jpeg', b'legacy'), migrated.load(1))
         self.assertFalse(os.path.exists(os.path.join(self.directory, '0.image')))
 
+    def test_exports_detector_images_with_stable_sortable_names(self):
+        self.store.save(10, 'jpeg', b'\xff\xd8ten')
+        self.store.save(2, 'png', b'\x89PNG\r\n\x1a\ntwo')
+        export_directory = os.path.join(self.directory, 'export')
+
+        self.store.export_images(export_directory)
+
+        self.assertEqual(['00000002.png', '00000010.jpg'],
+                         sorted(os.listdir(export_directory)))
+        with open(os.path.join(export_directory, '00000010.jpg'), 'rb') as image_file:
+            self.assertEqual(b'\xff\xd8ten', image_file.read())
+
+    def test_export_rejects_unknown_image_format(self):
+        self.store.save(1, 'application/octet-stream', b'not-an-image')
+        with self.assertRaises(ValueError):
+            self.store.export_images(os.path.join(self.directory, 'export'))
+
 
 if __name__ == '__main__':
     unittest.main()
