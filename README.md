@@ -27,11 +27,12 @@ ROS-топики, публикует реестр шаблонов и выдаё
 | выход, latched | список сохранённых ID | `std_msgs/Int32MultiArray` | `/find_object_3d_web/objects` |
 | выход | положение обнаруженного объекта | `tf2_msgs/TFMessage` | `/tf` |
 
-Нода сохраняет каждый принятый эталон на диске, назначает ID для запросов с
-пустым `header.frame_id` и пересылает нормализованное сообщение во внутренний
-топик детектора. При следующем запуске сохранённые эталоны автоматически снова
-загружаются в `find_object_2d`. Все имена входов можно переопределить аргументами
-launch-файла. `/tf` переназначать обычно не требуется.
+Нода сохраняет каждый принятый эталон на диске и назначает ID для запросов с
+пустым `header.frame_id`. Менеджер создаёт совместимый каталог изображений и
+перезапускает детектор с поддерживаемым параметром `objects_path` после
+добавления или удаления объекта. Все
+имена входов можно переопределить аргументами launch-файла. `/tf` переназначать
+обычно не требуется.
 
 ### Общие команды для просмотра
 
@@ -122,7 +123,7 @@ rostopic echo -n 1 /video/camera_info
 | Поле | Что передавать |
 |---|---|
 | `header.stamp` | время отправки; рекомендуется текущее ROS-время |
-| `header.frame_id` | десятичный ID, например строка `"7"`; пустая строка запрашивает автоматический ID |
+| `header.frame_id` | положительный десятичный ID, например строка `"7"`; пустая строка запрашивает автоматический ID |
 | `format` | строка `"jpeg"` (или формат, поддерживаемый `find_object_2d`) |
 | `data` | байты целого сжатого изображения, а не base64 и не путь к файлу |
 
@@ -154,15 +155,20 @@ rospy.sleep(1.0)
 rostopic info /find_object_2d/add_object
 ```
 
-В `Subscribers` должен присутствовать `find_object_3d_web`: он сохраняет шаблон
-и затем пересылает его запущенному из launch-файла детектору. Пустой `data`
-отмечается предупреждением и не сохраняется.
+В `Subscribers` должен присутствовать `find_object_3d_web`: он сохраняет шаблон,
+запрашивает обновление каталога объектов и перезапуск детектора. Пустой `data` отмечается
+предупреждением и не сохраняется. У `find_object_2d 0.7.0` нет subscriber для
+динамической загрузки `CompressedImage`, поэтому пакет не пытается пересылать
+шаблон в несуществующий вход.
 
 Для каждого сохранённого ID нода запоминает запрос. Первое обнаружение того же ID в
 `/objectsStamped` создаёт лог `Template processing confirmed by first detection`
 — это сквозное подтверждение участия эталона в детекции. При пустом
-`header.frame_id` назначается наименьший свободный неотрицательный ID. Подробный
-лог входного сообщения включается командой:
+`header.frame_id` назначается наименьший свободный положительный ID.
+ID `0` зарезервирован самим `find_object_2d`; автоматическая нумерация начинается
+с `1`. При первом запуске обновлённого пакета старый сохранённый ID `0`
+автоматически переносится на ближайший свободный положительный ID. Подробный лог
+входного сообщения включается командой:
 
 ```bash
 rosconsole set /find_object_3d_web ros.find_object_3d_web debug
@@ -177,17 +183,19 @@ rosconsole set /find_object_3d_web ros.find_object_3d_web debug
 rostopic echo -n 1 /find_object_3d_web/objects
 ```
 
-Тип топика — `std_msgs/Int32MultiArray`, например `data: [0, 2, 7]`. Чтобы
+Тип топика — `std_msgs/Int32MultiArray`, например `data: [1, 2, 7]`. Чтобы
 удалить ID `7` с диска и из работающего `find_object_2d`, опубликуйте:
 
 ```bash
 rostopic pub -1 /find_object_3d_web/remove_object std_msgs/Int32 "data: 7"
 ```
 
-После добавления или удаления список публикуется заново. По умолчанию файлы
-хранятся в `~/.ros/find_object_3d_web/objects`; каталог изменяется параметром
-`storage_directory` в `config/default.yaml`. Удаление отсутствующего или
-отрицательного ID отклоняется.
+После добавления или удаления список публикуется заново, каталог изображений для
+`find_object_2d` обновляется, а детектор автоматически перезапускается. По
+умолчанию исходные файлы хранятся в `~/.ros/find_object_3d_web/objects`, а
+экспортированные JPEG/PNG — в `~/.ros/find_object_3d_web/detector_objects`.
+Пути изменяются параметрами `storage_directory` и `detector_objects_path`.
+Удаление отсутствующего или неположительного ID отклоняется.
 
 ### `/objectsStamped` — двумерные обнаружения
 
@@ -319,7 +327,7 @@ source devel/setup.bash
 
    ```bash
    rostopic echo /objectsStamped
-   rosrun tf tf_echo <camera_info_frame> object_0
+   rosrun tf tf_echo <camera_info_frame> object_1
    ```
 
 Имена входных топиков узла локализации можно изменить аргументами:
@@ -332,6 +340,21 @@ roslaunch find_object_3d_web find_object_3d_web.launch \
   remove_object_topic:=/find_object_3d_web/remove_object \
   object_list_topic:=/find_object_3d_web/objects
 ```
+
+Пути внутреннего хранилища и экспортируемого каталога можно изменить отдельно:
+
+```bash
+roslaunch find_object_3d_web find_object_3d_web.launch \
+  storage_directory:=/data/find_objects \
+  detector_objects_path:=/data/find_object_2d_images
+```
+
+При старте `find_object_2d_session_manager` сначала экспортирует все `<id>.image`
+из хранилища в обычные JPEG/PNG и только затем запускает `/find_object_2d` с
+`objects_path`. Это исключает гонку, при которой детектор стартует раньше
+восстановления эталонов. Бинарный `session.bin` намеренно не генерируется: пакет
+`ros-melodic-find-object-2d` устанавливает библиотеку без публичных C++-заголовков,
+а `objects_path` является штатным интерфейсом установленной ноды.
 
 По умолчанию `find_object_2d` запускается без графического интерфейса
 (`detector_gui:=false`). Это позволяет запускать пакет на роботе или через SSH без
@@ -351,8 +374,27 @@ RGB/depth-топиками; однако без детектора `/objectsStam
 После обновления пакета пересоберите workspace и повторно загрузите окружение:
 
 ```bash
-catkin_make && source devel/setup.bash
+catkin_make --force-cmake && source devel/setup.bash
 ```
+
+Если CMake после обновления всё ещё упоминает удалённую цель
+`find_object_session_generator`, используется старый исходный файл или кэш
+предыдущей сборки. В актуальном `CMakeLists.txt` такой цели нет. Проверьте commit и
+очистите кэш пакета:
+
+```bash
+git -C ~/myrobot/src/ros_find_objects_deep_learning rev-parse --short HEAD
+grep -n find_object_session_generator \
+  ~/myrobot/src/ros_find_objects_deep_learning/CMakeLists.txt
+rm -rf ~/myrobot/build/ros_find_objects_deep_learning
+cd ~/myrobot
+catkin_make --force-cmake
+source devel/setup.bash
+```
+
+Команда `grep` не должна ничего вывести. Если ошибка сохраняется, удалите общие
+каталоги `build` и `devel` workspace и выполните полную сборку заново; это также
+пересоздаст верхнеуровневый кэш catkin.
 
 ## Важные условия
 
