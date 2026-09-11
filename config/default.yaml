@@ -7,3 +7,4 @@ max_depth: 100.0
 max_depth_age: 0.5
 object_frame_prefix: "object_"
 storage_directory: "~/.ros/find_object_3d_web/objects"
+detector_objects_path: "~/.ros/find_object_3d_web/detector_objects"

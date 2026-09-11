@@ -10,12 +10,11 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   tf2_ros
 )
-
 catkin_python_setup()
 
 catkin_package(CATKIN_DEPENDS cv_bridge find_object_2d geometry_msgs rospy sensor_msgs std_msgs tf2_ros)
 
-catkin_install_python(PROGRAMS scripts/find_object_3d_web_node
+catkin_install_python(PROGRAMS scripts/find_object_3d_web_node scripts/find_object_2d_session_manager
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
 
 install(DIRECTORY launch config
