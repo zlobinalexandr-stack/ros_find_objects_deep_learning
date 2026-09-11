@@ -7,8 +7,9 @@ import numpy as np
 import rospy
 from cv_bridge import CvBridge, CvBridgeError
 from find_object_2d.msg import ObjectsStamped
-from geometry_msgs.msg import TransformStamped
+from geometry_msgs.msg import PointStamped, TransformStamped
 import sensor_msgs.msg
+import tf2_geometry_msgs  # noqa: F401: registers PointStamped conversions with TF2
 import tf2_ros
 
 from find_object_3d_web.geometry import calibrate_depth, parse_detections, projected_center, project_pixel, robust_depth
@@ -32,6 +33,9 @@ class Node(object):
         self.state = SharedState()
         self.bridge = CvBridge()
         self.tf_broadcaster = tf2_ros.TransformBroadcaster()
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
+        self.output_frame = rospy.get_param('~output_frame', 'map')
         self.depth_scale = float(rospy.get_param('~depth_scale', 1.0))
         self.depth_calibration_scale = float(
             rospy.get_param('~depth_calibration_scale', 1.0))
@@ -225,15 +229,37 @@ class Node(object):
                     continue
                 # CameraInfo normally describes RGB dimensions, so project the original RGB pixel.
                 x, y, z = project_pixel(u, v, z, info)
-                transform = TransformStamped()
-                transform.header.stamp = stamp if stamp != rospy.Time(0) else rospy.Time.now()
+                point = PointStamped()
+                point.header.stamp = stamp if stamp != rospy.Time(0) else rospy.Time.now()
                 # Projection uses the RGB CameraInfo model, therefore the result belongs
                 # to its optical frame (registered depth is a prerequisite).
-                transform.header.frame_id = info.header.frame_id or depth_frame
+                point.header.frame_id = info.header.frame_id or depth_frame
+                point.point.x = x
+                point.point.y = y
+                point.point.z = z
+                if not point.header.frame_id:
+                    rospy.logwarn_throttle(
+                        5, 'Cannot localize object id=%d: camera optical frame is empty',
+                        object_id)
+                    continue
+                try:
+                    output_point = self.tf_buffer.transform(
+                        point, self.output_frame, rospy.Duration(0.1))
+                except (tf2_ros.LookupException, tf2_ros.ConnectivityException,
+                        tf2_ros.ExtrapolationException) as error:
+                    rospy.logwarn_throttle(
+                        5, 'Cannot transform object id=%d from %s to %s; detection is not '
+                        'published: %s', object_id, point.header.frame_id,
+                        self.output_frame, error)
+                    continue
+
+                transform = TransformStamped()
+                transform.header.stamp = output_point.header.stamp
+                transform.header.frame_id = self.output_frame
                 transform.child_frame_id = self.frame_prefix + str(object_id)
-                transform.transform.translation.x = x
-                transform.transform.translation.y = y
-                transform.transform.translation.z = z
+                transform.transform.translation.x = output_point.point.x
+                transform.transform.translation.y = output_point.point.y
+                transform.transform.translation.z = output_point.point.z
                 transform.transform.rotation.w = 1.0
                 try:
                     self.tf_broadcaster.sendTransform(transform)
@@ -245,7 +271,8 @@ class Node(object):
                     1.0,
                     'Object detected: id=%d pixel=(%.1f, %.1f) position=(%.3f, %.3f, %.3f) '
                     'frame=%s tf=%s',
-                    object_id, u, v, x, y, z, transform.header.frame_id,
+                    object_id, u, v, output_point.point.x, output_point.point.y,
+                    output_point.point.z, transform.header.frame_id,
                     transform.child_frame_id)
         except (ValueError, TypeError) as error:
             rospy.logwarn_throttle(5, 'Invalid find_object_2d detection: %s', error)
