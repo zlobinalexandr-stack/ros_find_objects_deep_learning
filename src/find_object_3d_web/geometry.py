@@ -6,14 +6,28 @@ import numpy as np
 RECORD_SIZE = 12
 
 
+def calibrate_depth(depth, scale, offset):
+    """Apply a metric affine calibration to scalar or array depth values."""
+    if not np.isfinite(scale) or scale <= 0:
+        raise ValueError('depth calibration scale must be finite and positive')
+    if not np.isfinite(offset):
+        raise ValueError('depth calibration offset must be finite')
+    return np.asarray(depth) * scale + offset
+
+
 def parse_detections(values):
     """Yield (id, template_width, template_height, 3x3 homography) records."""
     if len(values) % RECORD_SIZE:
         raise ValueError('find_object_2d data length must be a multiple of 12')
     for start in range(0, len(values), RECORD_SIZE):
         record = values[start:start + RECORD_SIZE]
-        yield int(record[0]), record[1], record[2], np.asarray(
-            record[3:12], dtype=np.float64).reshape((3, 3))
+        # find_object_2d serializes the homography one *column* at a time
+        # (h11, h21, h31, h12, ...). NumPy reshapes flat arrays row-first,
+        # therefore transpose the intermediate matrix. Treating the wire
+        # representation as row-major moves the translation into the
+        # projective denominator and makes detections project near (0, 0).
+        homography = np.asarray(record[3:12], dtype=np.float64).reshape((3, 3)).T
+        yield int(record[0]), record[1], record[2], homography
 
 
 def projected_center(width, height, homography):
