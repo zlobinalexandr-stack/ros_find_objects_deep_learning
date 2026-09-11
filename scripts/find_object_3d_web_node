@@ -12,7 +12,9 @@ import sensor_msgs.msg
 import tf2_geometry_msgs  # noqa: F401: registers PointStamped conversions with TF2
 import tf2_ros
 
-from find_object_3d_web.geometry import calibrate_depth, parse_detections, projected_center, project_pixel, robust_depth
+from find_object_3d_web.geometry import (ExponentialPositionFilter, calibrate_depth,
+                                         parse_detections, projected_center,
+                                         project_pixel, robust_depth)
 from find_object_3d_web.object_store import ObjectStore
 from std_msgs.msg import Empty, Int32, Int32MultiArray
 
@@ -48,6 +50,9 @@ class Node(object):
         self.min_depth = float(rospy.get_param('~min_depth', 0.05))
         self.max_depth = float(rospy.get_param('~max_depth', 100.0))
         self.max_depth_age = float(rospy.get_param('~max_depth_age', 0.5))
+        self.position_filter = ExponentialPositionFilter(
+            rospy.get_param('~position_smoothing_factor', 0.25),
+            rospy.get_param('~position_filter_reset_time', 1.0))
         self.frame_prefix = rospy.get_param('~object_frame_prefix', 'object_')
         storage_directory = rospy.get_param(
             '~storage_directory', '~/.ros/find_object_3d_web/objects')
@@ -149,6 +154,7 @@ class Node(object):
                 rospy.logwarn('Cannot remove template id=%d: it is not stored', object_id)
                 return
             self.state.pending_object_ids.pop(object_id, None)
+            self.position_filter.reset(object_id)
         self.detector_reload_publisher.publish(Empty())
         self.publish_object_list()
         rospy.loginfo('Template id=%d removed; find_object_2d reload requested', object_id)
@@ -257,9 +263,14 @@ class Node(object):
                 transform.header.stamp = output_point.header.stamp
                 transform.header.frame_id = self.output_frame
                 transform.child_frame_id = self.frame_prefix + str(object_id)
-                transform.transform.translation.x = output_point.point.x
-                transform.transform.translation.y = output_point.point.y
-                transform.transform.translation.z = output_point.point.z
+                with self.state.lock:
+                    filtered_position = self.position_filter.update(
+                        object_id,
+                        (output_point.point.x, output_point.point.y, output_point.point.z),
+                        output_point.header.stamp.to_sec())
+                transform.transform.translation.x = filtered_position[0]
+                transform.transform.translation.y = filtered_position[1]
+                transform.transform.translation.z = filtered_position[2]
                 transform.transform.rotation.w = 1.0
                 try:
                     self.tf_broadcaster.sendTransform(transform)
@@ -271,8 +282,8 @@ class Node(object):
                     1.0,
                     'Object detected: id=%d pixel=(%.1f, %.1f) position=(%.3f, %.3f, %.3f) '
                     'frame=%s tf=%s',
-                    object_id, u, v, output_point.point.x, output_point.point.y,
-                    output_point.point.z, transform.header.frame_id,
+                    object_id, u, v, filtered_position[0], filtered_position[1],
+                    filtered_position[2], transform.header.frame_id,
                     transform.child_frame_id)
         except (ValueError, TypeError) as error:
             rospy.logwarn_throttle(5, 'Invalid find_object_2d detection: %s', error)
