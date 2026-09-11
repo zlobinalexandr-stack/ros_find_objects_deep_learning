@@ -12,8 +12,12 @@ class CameraInfo(object):
 
 class GeometryTest(unittest.TestCase):
     def test_detection_and_homography_center(self):
-        records = list(parse_detections([7, 20, 10, 1, 0, 100, 0, 1, 50, 0, 0, 1]))
+        # find_object_2d writes matrices column by column. This represents
+        # [[1, 0, 100], [0, 1, 50], [0, 0, 1]].
+        records = list(parse_detections([7, 20, 10, 1, 0, 0, 0, 1, 0, 100, 50, 1]))
         self.assertEqual(records[0][0], 7)
+        np.testing.assert_array_equal(
+            records[0][3], [[1, 0, 100], [0, 1, 50], [0, 0, 1]])
         self.assertEqual(projected_center(records[0][1], records[0][2], records[0][3]), (110.0, 55.0))
 
     def test_malformed_detection(self):
