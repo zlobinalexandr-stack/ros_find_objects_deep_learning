@@ -377,24 +377,27 @@ RGB/depth-топиками; однако без детектора `/objectsStam
 catkin_make --force-cmake && source devel/setup.bash
 ```
 
-Если CMake после обновления всё ещё упоминает удалённую цель
-`find_object_session_generator`, используется старый исходный файл или кэш
-предыдущей сборки. В актуальном `CMakeLists.txt` такой цели нет. Проверьте commit и
-очистите кэш пакета:
+Если CMake после обновления сообщает, что цель `find_object_session_generator`
+не существует, используется старый исходный файл или кэш предыдущей сборки. В
+актуальном `CMakeLists.txt` её установка защищена условием `if(TARGET ...)`,
+поэтому правило для отсутствующей цели не создаётся. Проверьте commit и очистите
+кэш пакета:
 
 ```bash
 git -C ~/myrobot/src/ros_find_objects_deep_learning rev-parse --short HEAD
-grep -n find_object_session_generator \
-  ~/myrobot/src/ros_find_objects_deep_learning/CMakeLists.txt
+nl -ba ~/myrobot/src/ros_find_objects_deep_learning/CMakeLists.txt | sed -n '15,32p'
 rm -rf ~/myrobot/build/ros_find_objects_deep_learning
 cd ~/myrobot
 catkin_make --force-cmake
 source devel/setup.bash
 ```
 
-Команда `grep` не должна ничего вывести. Если ошибка сохраняется, удалите общие
-каталоги `build` и `devel` workspace и выполните полную сборку заново; это также
-пересоздаст верхнеуровневый кэш catkin.
+Строка `install(TARGETS find_object_session_generator ...)` должна находиться
+между `if(TARGET find_object_session_generator)` и `endif()`. Если она выполняется
+без этого условия, обновление исходников применено не полностью. Если ошибка
+сохраняется с правильным файлом, удалите общие каталоги `build` и `devel`
+workspace и выполните полную сборку заново; это также пересоздаст
+верхнеуровневый кэш catkin.
 
 ## Важные условия
 
