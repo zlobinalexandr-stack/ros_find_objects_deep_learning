@@ -103,12 +103,14 @@ class Node(object):
 
         with self.state.lock:
             try:
-                object_id = int(requested_id) if requested_id else self.store.allocate_id()
-                if object_id <= 0:
-                    raise ValueError()
+                # find_object_2d uses both an empty frame and "0" to request
+                # automatic object numbering.  rosbridge clients commonly send
+                # the explicit "0" form.
+                object_id = self.store.resolve_requested_id(requested_id)
             except ValueError:
                 rospy.logwarn(
-                    'Cannot add template: frame_id=%r is not a positive decimal object ID',
+                    'Cannot add template: frame_id=%r is neither 0 (automatic) nor a '
+                    'positive decimal object ID',
                     msg.header.frame_id)
                 return
 

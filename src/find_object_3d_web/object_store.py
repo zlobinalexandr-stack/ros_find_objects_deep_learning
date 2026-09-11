@@ -38,6 +38,16 @@ class ObjectStore(object):
             object_id += 1
         return object_id
 
+    def resolve_requested_id(self, requested_id):
+        """Return the requested ID, allocating one for the automatic-ID markers."""
+        requested_id = str(requested_id).strip()
+        if requested_id in ('', '0'):
+            return self.allocate_id()
+        object_id = int(requested_id)
+        if object_id <= 0:
+            raise ValueError('object ID must be positive')
+        return object_id
+
     def save(self, object_id, image_format, data):
         object_id = self._validate_id(object_id)
         metadata = {'id': object_id, 'format': image_format or ''}
