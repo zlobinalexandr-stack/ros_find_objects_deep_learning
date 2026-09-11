@@ -3,7 +3,7 @@
 depth_scale: 1.0
 # Metric calibration after conversion of the depth image to metres:
 # calibrated_depth = depth * depth_calibration_scale + depth_calibration_offset
-depth_calibration_scale: 6.0
+depth_calibration_scale: 1.0
 depth_calibration_offset: 0.0
 depth_window_radius: 4
 min_depth: 0.05
