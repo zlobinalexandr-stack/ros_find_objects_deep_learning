@@ -310,6 +310,21 @@ roslaunch find_object_3d_web find_object_3d_web.launch \
   object_list_topic:=/find_object_3d_web/objects
 ```
 
+По умолчанию `find_object_2d` запускается без графического интерфейса
+(`detector_gui:=false`). Это позволяет запускать пакет на роботе или через SSH без
+X-сервера. Для локальной настройки детектора с окном Qt включите интерфейс явно:
+
+```bash
+roslaunch find_object_3d_web find_object_3d_web.launch detector_gui:=true
+```
+
+Если при запуске видны сообщения `Could not connect to display` или
+`Could not connect to any X display`, значит GUI был включён, но процесс не имеет
+доступа к X-серверу. Отключите его через `detector_gui:=false` либо настройте
+рабочий X11 forwarding. Падение `find_object_2d` в этом случае не связано с
+RGB/depth-топиками; однако без детектора `/objectsStamped` больше не получает
+новые обнаружения, даже если `find_object_3d_web` продолжает работать.
+
 После обновления пакета пересоберите workspace и повторно загрузите окружение:
 
 ```bash
