@@ -9,6 +9,7 @@ depth_window_radius: 4
 min_depth: 0.05
 max_depth: 100.0
 max_depth_age: 0.5
+output_frame: "map"
 object_frame_prefix: "object_"
 storage_directory: "~/.ros/find_object_3d_web/objects"
 detector_objects_path: "~/.ros/find_object_3d_web/detector_objects"

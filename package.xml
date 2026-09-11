@@ -16,6 +16,7 @@
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
   <depend>tf2_ros</depend>
+  <depend>tf2_geometry_msgs</depend>
   <test_depend>python-nose</test_depend>
   <export/>
 </package>
