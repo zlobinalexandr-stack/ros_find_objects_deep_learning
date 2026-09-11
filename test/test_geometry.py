@@ -3,7 +3,9 @@ import unittest
 
 import numpy as np
 
-from find_object_3d_web.geometry import calibrate_depth, parse_detections, projected_center, project_pixel, robust_depth
+from find_object_3d_web.geometry import (ExponentialPositionFilter, calibrate_depth,
+                                         parse_detections, projected_center,
+                                         project_pixel, robust_depth)
 
 
 class CameraInfo(object):
@@ -11,6 +13,25 @@ class CameraInfo(object):
 
 
 class GeometryTest(unittest.TestCase):
+    def test_exponential_position_filter_smooths_each_object_independently(self):
+        position_filter = ExponentialPositionFilter(0.25, 1.0)
+
+        self.assertEqual(position_filter.update(1, (0, 0, 0), 10.0), (0, 0, 0))
+        self.assertEqual(position_filter.update(1, (4, 8, 12), 10.1), (1, 2, 3))
+        self.assertEqual(position_filter.update(2, (4, 8, 12), 10.1), (4, 8, 12))
+
+    def test_position_filter_resets_after_detection_gap(self):
+        position_filter = ExponentialPositionFilter(0.25, 1.0)
+        position_filter.update(1, (0, 0, 0), 10.0)
+
+        self.assertEqual(position_filter.update(1, (4, 8, 12), 11.1), (4, 8, 12))
+
+    def test_position_filter_rejects_invalid_configuration(self):
+        for smoothing_factor, reset_after in ((0.0, 1.0), (1.1, 1.0),
+                                               (0.5, 0.0)):
+            with self.assertRaises(ValueError):
+                ExponentialPositionFilter(smoothing_factor, reset_after)
+
     def test_affine_depth_calibration(self):
         np.testing.assert_allclose(
             calibrate_depth(np.asarray([1.0, 2.0]), 1.2, -0.1),

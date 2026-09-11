@@ -6,6 +6,42 @@ import numpy as np
 RECORD_SIZE = 12
 
 
+class ExponentialPositionFilter(object):
+    """Keep an exponential moving average of positions, independently by ID."""
+
+    def __init__(self, smoothing_factor, reset_after):
+        self.smoothing_factor = float(smoothing_factor)
+        self.reset_after = float(reset_after)
+        if (not np.isfinite(self.smoothing_factor) or
+                self.smoothing_factor <= 0.0 or self.smoothing_factor > 1.0):
+            raise ValueError('position smoothing factor must be in (0, 1]')
+        if not np.isfinite(self.reset_after) or self.reset_after <= 0.0:
+            raise ValueError('position filter reset time must be finite and positive')
+        self._states = {}
+
+    def update(self, object_id, position, stamp):
+        """Return a filtered position, resetting after gaps or time jumps."""
+        position = np.asarray(position, dtype=np.float64)
+        if position.shape != (3,) or not np.all(np.isfinite(position)):
+            raise ValueError('object position must contain three finite coordinates')
+        stamp = float(stamp)
+        if not np.isfinite(stamp):
+            raise ValueError('position timestamp must be finite')
+
+        previous = self._states.get(object_id)
+        if (previous is None or stamp < previous[1] or
+                stamp - previous[1] > self.reset_after):
+            filtered = position
+        else:
+            filtered = (self.smoothing_factor * position +
+                        (1.0 - self.smoothing_factor) * previous[0])
+        self._states[object_id] = (filtered, stamp)
+        return tuple(filtered)
+
+    def reset(self, object_id):
+        self._states.pop(object_id, None)
+
+
 def calibrate_depth(depth, scale, offset):
     """Apply a metric affine calibration to scalar or array depth values."""
     if not np.isfinite(scale) or scale <= 0:

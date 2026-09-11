@@ -9,6 +9,10 @@ depth_window_radius: 4
 min_depth: 0.05
 max_depth: 100.0
 max_depth_age: 0.5
+# Exponential moving average in output_frame. Smaller values suppress jitter more,
+# while 1.0 disables smoothing. Reset after a detection gap to avoid stale positions.
+position_smoothing_factor: 0.25
+position_filter_reset_time: 1.0
 output_frame: "map"
 object_frame_prefix: "object_"
 storage_directory: "~/.ros/find_object_3d_web/objects"
