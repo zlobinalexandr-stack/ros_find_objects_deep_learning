@@ -11,6 +11,8 @@
   <arg name="storage_directory" default="$(env HOME)/.ros/find_object_3d_web/objects"/>
   <arg name="detector_objects_path" default="$(env HOME)/.ros/find_object_3d_web/detector_objects"/>
   <arg name="detector_reload_topic" default="/find_object_3d_web/detector/reload"/>
+  <arg name="depth_calibration_scale" default="1.0"/>
+  <arg name="depth_calibration_offset" default="0.0"/>
 
   <node pkg="find_object_3d_web" type="find_object_2d_session_manager" name="find_object_2d_session_manager" output="screen">
     <param name="gui" value="$(arg detector_gui)"/>
@@ -31,5 +33,8 @@
     <param name="object_list_topic" value="$(arg object_list_topic)"/>
     <param name="storage_directory" value="$(arg storage_directory)"/>
     <param name="detector_reload_topic" value="$(arg detector_reload_topic)"/>
+    <!-- These params intentionally follow rosparam load so launch arguments override defaults. -->
+    <param name="depth_calibration_scale" value="$(arg depth_calibration_scale)"/>
+    <param name="depth_calibration_offset" value="$(arg depth_calibration_offset)"/>
   </node>
 </launch>

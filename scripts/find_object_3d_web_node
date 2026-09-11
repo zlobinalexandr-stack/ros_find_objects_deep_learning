@@ -11,7 +11,7 @@ from geometry_msgs.msg import TransformStamped
 import sensor_msgs.msg
 import tf2_ros
 
-from find_object_3d_web.geometry import parse_detections, projected_center, project_pixel, robust_depth
+from find_object_3d_web.geometry import calibrate_depth, parse_detections, projected_center, project_pixel, robust_depth
 from find_object_3d_web.object_store import ObjectStore
 from std_msgs.msg import Empty, Int32, Int32MultiArray
 
@@ -33,6 +33,13 @@ class Node(object):
         self.bridge = CvBridge()
         self.tf_broadcaster = tf2_ros.TransformBroadcaster()
         self.depth_scale = float(rospy.get_param('~depth_scale', 1.0))
+        self.depth_calibration_scale = float(
+            rospy.get_param('~depth_calibration_scale', 1.0))
+        self.depth_calibration_offset = float(
+            rospy.get_param('~depth_calibration_offset', 0.0))
+        # Validate calibration at startup instead of silently publishing bad TF.
+        calibrate_depth(0.0, self.depth_calibration_scale,
+                        self.depth_calibration_offset)
         self.radius = int(rospy.get_param('~depth_window_radius', 4))
         self.min_depth = float(rospy.get_param('~min_depth', 0.05))
         self.max_depth = float(rospy.get_param('~max_depth', 100.0))
@@ -157,7 +164,10 @@ class Node(object):
         try:
             depth = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
             with self.state.lock:
-                self.state.depth = np.asarray(depth, dtype=np.float32) * self.depth_scale
+                depth = np.asarray(depth, dtype=np.float32) * self.depth_scale
+                self.state.depth = calibrate_depth(
+                    depth, self.depth_calibration_scale,
+                    self.depth_calibration_offset)
                 self.state.depth_stamp = msg.header.stamp
                 self.state.depth_frame = msg.header.frame_id
         except CvBridgeError as error:

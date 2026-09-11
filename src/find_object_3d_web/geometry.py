@@ -6,6 +6,15 @@ import numpy as np
 RECORD_SIZE = 12
 
 
+def calibrate_depth(depth, scale, offset):
+    """Apply a metric affine calibration to scalar or array depth values."""
+    if not np.isfinite(scale) or scale <= 0:
+        raise ValueError('depth calibration scale must be finite and positive')
+    if not np.isfinite(offset):
+        raise ValueError('depth calibration offset must be finite')
+    return np.asarray(depth) * scale + offset
+
+
 def parse_detections(values):
     """Yield (id, template_width, template_height, 3x3 homography) records."""
     if len(values) % RECORD_SIZE:

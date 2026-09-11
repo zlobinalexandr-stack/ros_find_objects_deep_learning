@@ -3,7 +3,7 @@ import unittest
 
 import numpy as np
 
-from find_object_3d_web.geometry import parse_detections, projected_center, project_pixel, robust_depth
+from find_object_3d_web.geometry import calibrate_depth, parse_detections, projected_center, project_pixel, robust_depth
 
 
 class CameraInfo(object):
@@ -11,6 +11,17 @@ class CameraInfo(object):
 
 
 class GeometryTest(unittest.TestCase):
+    def test_affine_depth_calibration(self):
+        np.testing.assert_allclose(
+            calibrate_depth(np.asarray([1.0, 2.0]), 1.2, -0.1),
+            [1.1, 2.3])
+
+    def test_rejects_invalid_depth_calibration(self):
+        for scale, offset in ((0.0, 0.0), (-1.0, 0.0), (np.nan, 0.0),
+                              (1.0, np.inf)):
+            with self.assertRaises(ValueError):
+                calibrate_depth(1.0, scale, offset)
+
     def test_detection_and_homography_center(self):
         # find_object_2d writes matrices column by column. This represents
         # [[1, 0, 100], [0, 1, 50], [0, 0, 1]].
