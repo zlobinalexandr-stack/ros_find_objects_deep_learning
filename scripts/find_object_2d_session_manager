@@ -1,0 +1,93 @@
+#!/usr/bin/env python
+from __future__ import print_function
+
+import os
+import signal
+import shutil
+import subprocess
+import sys
+import threading
+
+import roslib.packages
+import rospy
+from find_object_3d_web.object_store import ObjectStore
+from std_msgs.msg import Empty
+
+
+class SessionManager(object):
+    def __init__(self):
+        self.storage = os.path.abspath(os.path.expanduser(
+            rospy.get_param('~storage_directory')))
+        self.detector_objects = os.path.abspath(os.path.expanduser(
+            rospy.get_param('~detector_objects_path')))
+        self.gui = rospy.get_param('~gui', False)
+        self.lock = threading.Lock()
+        self.process = None
+        reload_topic = rospy.get_param(
+            '~reload_topic', '/find_object_3d_web/detector/reload')
+        rospy.Subscriber(reload_topic, Empty, self.reload_callback, queue_size=1)
+        rospy.on_shutdown(self.stop)
+
+    def generate(self):
+        if not os.path.isdir(self.storage):
+            os.makedirs(self.storage)
+        store = ObjectStore(self.storage)
+        parent = os.path.dirname(self.detector_objects)
+        if parent and not os.path.isdir(parent):
+            os.makedirs(parent)
+        temporary_directory = self.detector_objects + '.tmp'
+        store.export_images(temporary_directory)
+        if os.path.isdir(self.detector_objects):
+            shutil.rmtree(self.detector_objects)
+        os.rename(temporary_directory, self.detector_objects)
+
+    def detector_command(self):
+        executable = roslib.packages.find_node('find_object_2d', 'find_object_2d')[0]
+        remappings = [arg for arg in sys.argv[1:]
+                      if not arg.startswith('__name:=') and
+                      not arg.startswith('__log:=')]
+        remappings.extend([
+            '__name:=find_object_2d',
+            '_gui:=%s' % ('true' if self.gui else 'false'),
+        ])
+        remappings.append('_objects_path:=%s' % self.detector_objects)
+        return [executable] + remappings
+
+    def start(self):
+        self.generate()
+        self.process = subprocess.Popen(self.detector_command())
+
+    def stop(self):
+        with self.lock:
+            if self.process and self.process.poll() is None:
+                self.process.send_signal(signal.SIGINT)
+                self.process.wait()
+            self.process = None
+
+    def reload_callback(self, _message):
+        with self.lock:
+            if self.process and self.process.poll() is None:
+                self.process.send_signal(signal.SIGINT)
+                self.process.wait()
+            try:
+                self.generate()
+                self.process = subprocess.Popen(self.detector_command())
+                rospy.loginfo(
+                    'Reloaded find_object_2d from objects path %s',
+                    self.detector_objects)
+            except (OSError, subprocess.CalledProcessError) as error:
+                rospy.logerr('Cannot rebuild find_object_2d objects path: %s', error)
+
+    def spin(self):
+        self.start()
+        rate = rospy.Rate(2)
+        while not rospy.is_shutdown():
+            if self.process.poll() is not None:
+                rospy.logerr('find_object_2d exited with code %d', self.process.returncode)
+                return
+            rate.sleep()
+
+
+if __name__ == '__main__':
+    rospy.init_node('find_object_2d_session_manager')
+    SessionManager().spin()
