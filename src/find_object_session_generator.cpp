@@ -1,4 +1,4 @@
-#include <find_object_2d/FindObject.h>
+#include <FindObject.h>
 
 #include <opencv2/imgcodecs.hpp>
 #include <QCoreApplication>
